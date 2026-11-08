@@ -1,0 +1,43 @@
+# Root Git Ignore for AI Commerce Assistant
+
+# Environment files and credentials (CRITICAL)
+.env
+.env.backup
+.env.production
+ai-commerce-assistant/.env
+ai-commerce-assistant/.env.backup
+ai-commerce-assistant/.env.production
+*.env
+
+# Dependencies
+vendor/
+ai-commerce-assistant/vendor/
+node_modules/
+ai-commerce-assistant/node_modules/
+
+# Storage & Logs
+*.log
+ai-commerce-assistant/storage/*.key
+ai-commerce-assistant/storage/pail
+ai-commerce-assistant/storage/logs/*.log
+ai-commerce-assistant/public/storage
+
+# Cache & Tests
+.phpunit.cache/
+ai-commerce-assistant/.phpunit.cache/
+.phpunit.result.cache
+ai-commerce-assistant/.phpunit.result.cache
+
+# IDEs & System files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+
+# Flutter generated build files
+**/build/
+**/.dart_tool/
+**/.flutter-plugins*
+**/.pub-cache/
+**/.pub/
