@@ -17,19 +17,27 @@ class CategoriesTable
         return $table
             ->columns([
                 TextColumn::make('name')
-                    ->searchable(),
+                    ->label('اسم التصنيف')
+                    ->searchable()
+                    ->sortable()
+                    ->weight('bold'),
                 TextColumn::make('slug')
+                    ->label('المعرف اللطيف (Slug)')
+                    ->badge()
+                    ->color('gray')
                     ->searchable(),
                 TextColumn::make('parent.name')
-                    ->searchable(),
+                    ->label('التصنيف الأب')
+                    ->badge()
+                    ->color('info')
+                    ->searchable()
+                    ->placeholder('تصنيف رئيسي'),
                 IconColumn::make('is_active')
+                    ->label('نشط')
                     ->boolean(),
                 TextColumn::make('created_at')
-                    ->dateTime()
-                    ->sortable()
-                    ->toggleable(isToggledHiddenByDefault: true),
-                TextColumn::make('updated_at')
-                    ->dateTime()
+                    ->label('تاريخ الإنشاء')
+                    ->dateTime('d/m/Y H:i')
                     ->sortable()
                     ->toggleable(isToggledHiddenByDefault: true),
             ])
@@ -37,12 +45,12 @@ class CategoriesTable
                 //
             ])
             ->recordActions([
-                ViewAction::make(),
-                EditAction::make(),
+                ViewAction::make()->label('عرض'),
+                EditAction::make()->label('تعديل'),
             ])
             ->toolbarActions([
                 BulkActionGroup::make([
-                    DeleteBulkAction::make(),
+                    DeleteBulkAction::make()->label('حذف المحدد'),
                 ]),
             ]);
     }

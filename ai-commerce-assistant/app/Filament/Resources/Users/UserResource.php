@@ -15,12 +15,33 @@ use Filament\Resources\Resource;
 use Filament\Schemas\Schema;
 use Filament\Support\Icons\Heroicon;
 use Filament\Tables\Table;
+use UnitEnum;
 
 class UserResource extends Resource
 {
     protected static ?string $model = User::class;
 
-    protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedRectangleStack;
+    protected static ?string $modelLabel = 'مستخدم';
+
+    protected static ?string $pluralModelLabel = 'المستخدمين وإدارة النظام';
+
+    protected static ?string $navigationLabel = 'المستخدمين والصلاحيات';
+
+    protected static string | UnitEnum | null $navigationGroup = 'إدارة النظام والمستخدمين';
+
+    protected static ?int $navigationSort = 1;
+
+    protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedUsers;
+
+    public static function getNavigationBadge(): ?string
+    {
+        return (string) static::getModel()::count();
+    }
+
+    public static function getNavigationBadgeColor(): string|array|null
+    {
+        return 'danger';
+    }
 
     public static function form(Schema $schema): Schema
     {

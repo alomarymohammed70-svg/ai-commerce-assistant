@@ -15,12 +15,33 @@ use Filament\Resources\Resource;
 use Filament\Schemas\Schema;
 use Filament\Support\Icons\Heroicon;
 use Filament\Tables\Table;
+use UnitEnum;
 
 class ProductResource extends Resource
 {
     protected static ?string $model = Product::class;
 
-    protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedRectangleStack;
+    protected static ?string $modelLabel = 'منتج مستورد';
+
+    protected static ?string $pluralModelLabel = 'المنتجات المستوردة';
+
+    protected static ?string $navigationLabel = 'المنتجات المستوردة';
+
+    protected static string | UnitEnum | null $navigationGroup = 'إدارة الكتالوج والمنتجات';
+
+    protected static ?int $navigationSort = 2;
+
+    protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedShoppingCart;
+
+    public static function getNavigationBadge(): ?string
+    {
+        return (string) static::getModel()::count();
+    }
+
+    public static function getNavigationBadgeColor(): string|array|null
+    {
+        return 'info';
+    }
 
     public static function form(Schema $schema): Schema
     {

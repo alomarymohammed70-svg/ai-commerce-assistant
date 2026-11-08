@@ -16,63 +16,71 @@ class ProductMetricsTable
         return $table
             ->columns([
                 TextColumn::make('canonicalProduct.name')
-                    ->searchable(),
-                TextColumn::make('product.title')
-                    ->searchable(),
+                    ->label('المنتج المعياري')
+                    ->searchable()
+                    ->weight('bold')
+                    ->limit(25),
                 TextColumn::make('selling_price')
-                    ->money()
+                    ->label('سعر البيع المقترح')
+                    ->money('USD')
+                    ->weight('bold')
+                    ->color('success')
                     ->sortable(),
                 TextColumn::make('purchase_price')
-                    ->money()
-                    ->sortable(),
-                TextColumn::make('shipping_cost')
-                    ->money()
-                    ->sortable(),
-                TextColumn::make('estimated_fees')
-                    ->numeric()
-                    ->sortable(),
-                TextColumn::make('other_costs')
-                    ->numeric()
+                    ->label('سعر الشراء / التكلفة')
+                    ->money('USD')
                     ->sortable(),
                 TextColumn::make('estimated_profit')
-                    ->numeric()
+                    ->label('صافي الربح المتوقع')
+                    ->money('USD')
+                    ->weight('bold')
+                    ->color('emerald')
                     ->sortable(),
                 TextColumn::make('profit_margin')
-                    ->numeric()
+                    ->label('هامش الربح (%)')
+                    ->numeric(1)
+                    ->suffix('%')
+                    ->badge()
+                    ->color('primary')
                     ->sortable(),
                 TextColumn::make('return_on_investment')
-                    ->numeric()
+                    ->label('العائد على الاستثمار (ROI)')
+                    ->numeric(1)
+                    ->suffix('%')
+                    ->badge()
+                    ->color('info')
                     ->sortable(),
                 TextColumn::make('opportunity_score')
-                    ->numeric()
-                    ->sortable(),
-                TextColumn::make('risk_score')
-                    ->numeric()
+                    ->label('مؤشر الفرصة')
+                    ->numeric(1)
+                    ->badge()
+                    ->color('warning')
                     ->sortable(),
                 TextColumn::make('competition_level')
+                    ->label('مستوى المنافسة')
+                    ->badge()
+                    ->color(fn (string $state): string => match (strtolower($state)) {
+                        'low', 'منخفض' => 'success',
+                        'medium', 'متوسط' => 'warning',
+                        'high', 'عالي' => 'danger',
+                        default => 'gray',
+                    })
                     ->searchable(),
                 TextColumn::make('calculated_at')
-                    ->dateTime()
+                    ->label('تاريخ الحساب')
+                    ->dateTime('d/m/Y H:i')
                     ->sortable(),
-                TextColumn::make('created_at')
-                    ->dateTime()
-                    ->sortable()
-                    ->toggleable(isToggledHiddenByDefault: true),
-                TextColumn::make('updated_at')
-                    ->dateTime()
-                    ->sortable()
-                    ->toggleable(isToggledHiddenByDefault: true),
             ])
             ->filters([
                 //
             ])
             ->recordActions([
-                ViewAction::make(),
-                EditAction::make(),
+                ViewAction::make()->label('عرض'),
+                EditAction::make()->label('تعديل'),
             ])
             ->toolbarActions([
                 BulkActionGroup::make([
-                    DeleteBulkAction::make(),
+                    DeleteBulkAction::make()->label('حذف المحدد'),
                 ]),
             ]);
     }

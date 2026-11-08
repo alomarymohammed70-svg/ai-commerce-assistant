@@ -16,20 +16,28 @@ class ProductSourcesTable
     {
         return $table
             ->columns([
-                TextColumn::make('code')
-                    ->searchable(),
                 TextColumn::make('name')
+                    ->label('اسم المنصة / السوق')
+                    ->searchable()
+                    ->sortable()
+                    ->weight('bold'),
+                TextColumn::make('code')
+                    ->label('رمز المنصة')
+                    ->badge()
+                    ->color('primary')
                     ->searchable(),
                 TextColumn::make('base_url')
+                    ->label('رابط الموقع الأساسي')
+                    ->limit(40)
+                    ->url(fn ($record) => $record->base_url, true)
+                    ->color('info')
                     ->searchable(),
                 IconColumn::make('is_active')
+                    ->label('حالة التكامل (نشط)')
                     ->boolean(),
                 TextColumn::make('created_at')
-                    ->dateTime()
-                    ->sortable()
-                    ->toggleable(isToggledHiddenByDefault: true),
-                TextColumn::make('updated_at')
-                    ->dateTime()
+                    ->label('تاريخ الإضافة')
+                    ->dateTime('d/m/Y H:i')
                     ->sortable()
                     ->toggleable(isToggledHiddenByDefault: true),
             ])
@@ -37,12 +45,12 @@ class ProductSourcesTable
                 //
             ])
             ->recordActions([
-                ViewAction::make(),
-                EditAction::make(),
+                ViewAction::make()->label('عرض'),
+                EditAction::make()->label('تعديل'),
             ])
             ->toolbarActions([
                 BulkActionGroup::make([
-                    DeleteBulkAction::make(),
+                    DeleteBulkAction::make()->label('حذف المحدد'),
                 ]),
             ]);
     }

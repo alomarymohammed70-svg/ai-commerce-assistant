@@ -15,24 +15,35 @@ class CanonicalProductsTable
     {
         return $table
             ->columns([
-                TextColumn::make('category.name')
-                    ->searchable(),
                 TextColumn::make('name')
-                    ->searchable(),
-                TextColumn::make('slug')
+                    ->label('اسم المنتج المعياري')
+                    ->searchable()
+                    ->sortable()
+                    ->weight('bold'),
+                TextColumn::make('category.name')
+                    ->label('التصنيف')
+                    ->badge()
+                    ->color('info')
                     ->searchable(),
                 TextColumn::make('brand')
+                    ->label('العلامة التجارية')
                     ->searchable(),
                 TextColumn::make('model_number')
+                    ->label('رقم الموديل')
                     ->searchable(),
                 TextColumn::make('base_currency')
+                    ->label('العملة الأساسية')
+                    ->badge()
+                    ->color('gray')
                     ->searchable(),
                 TextColumn::make('created_at')
-                    ->dateTime()
+                    ->label('تاريخ الإضافة')
+                    ->dateTime('d/m/Y H:i')
                     ->sortable()
                     ->toggleable(isToggledHiddenByDefault: true),
                 TextColumn::make('updated_at')
-                    ->dateTime()
+                    ->label('تاريخ التحديث')
+                    ->dateTime('d/m/Y H:i')
                     ->sortable()
                     ->toggleable(isToggledHiddenByDefault: true),
             ])
@@ -40,12 +51,12 @@ class CanonicalProductsTable
                 //
             ])
             ->recordActions([
-                ViewAction::make(),
-                EditAction::make(),
+                ViewAction::make()->label('عرض'),
+                EditAction::make()->label('تعديل'),
             ])
             ->toolbarActions([
                 BulkActionGroup::make([
-                    DeleteBulkAction::make(),
+                    DeleteBulkAction::make()->label('حذف المحدد'),
                 ]),
             ]);
     }

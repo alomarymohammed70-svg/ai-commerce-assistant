@@ -16,43 +16,58 @@ class ProductsTable
     {
         return $table
             ->columns([
-                TextColumn::make('canonicalProduct.name')
-                    ->searchable(),
+                TextColumn::make('title')
+                    ->label('عنوان المنتج المستورد')
+                    ->searchable()
+                    ->limit(35)
+                    ->weight('bold'),
                 TextColumn::make('source.name')
+                    ->label('المصدر / المنصة')
+                    ->badge()
+                    ->color('warning')
+                    ->searchable(),
+                TextColumn::make('canonicalProduct.name')
+                    ->label('المنتج المعياري')
+                    ->limit(25)
                     ->searchable(),
                 TextColumn::make('category.name')
-                    ->searchable(),
-                TextColumn::make('external_id')
-                    ->searchable(),
-                TextColumn::make('title')
+                    ->label('التصنيف')
+                    ->badge()
+                    ->color('info')
                     ->searchable(),
                 TextColumn::make('brand')
-                    ->searchable(),
-                TextColumn::make('currency')
+                    ->label('الماركة')
                     ->searchable(),
                 TextColumn::make('price')
-                    ->money()
-                    ->sortable(),
+                    ->label('السعر الحالي')
+                    ->money(fn ($record) => $record->currency ?? 'USD')
+                    ->sortable()
+                    ->weight('bold')
+                    ->color('success'),
                 TextColumn::make('original_price')
-                    ->money()
+                    ->label('السعر الأصلي')
+                    ->money(fn ($record) => $record->currency ?? 'USD')
                     ->sortable(),
                 TextColumn::make('rating')
-                    ->numeric()
+                    ->label('التقييم')
+                    ->numeric(1)
+                    ->badge()
+                    ->color('primary')
                     ->sortable(),
                 TextColumn::make('reviews_count')
+                    ->label('عدد التقييمات')
                     ->numeric()
                     ->sortable(),
                 IconColumn::make('is_available')
+                    ->label('متوفر')
                     ->boolean(),
                 TextColumn::make('observed_at')
-                    ->dateTime()
+                    ->label('تاريخ الرصد')
+                    ->dateTime('d/m/Y H:i')
                     ->sortable(),
                 TextColumn::make('created_at')
-                    ->dateTime()
-                    ->sortable()
-                    ->toggleable(isToggledHiddenByDefault: true),
-                TextColumn::make('updated_at')
-                    ->dateTime()
+                    ->label('تاريخ التسجيل')
+                    ->dateTime('d/m/Y H:i')
                     ->sortable()
                     ->toggleable(isToggledHiddenByDefault: true),
             ])
@@ -60,12 +75,12 @@ class ProductsTable
                 //
             ])
             ->recordActions([
-                ViewAction::make(),
-                EditAction::make(),
+                ViewAction::make()->label('عرض'),
+                EditAction::make()->label('تعديل'),
             ])
             ->toolbarActions([
                 BulkActionGroup::make([
-                    DeleteBulkAction::make(),
+                    DeleteBulkAction::make()->label('حذف المحدد'),
                 ]),
             ]);
     }

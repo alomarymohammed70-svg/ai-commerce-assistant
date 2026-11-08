@@ -15,12 +15,33 @@ use Filament\Resources\Resource;
 use Filament\Schemas\Schema;
 use Filament\Support\Icons\Heroicon;
 use Filament\Tables\Table;
+use UnitEnum;
 
 class AIAnalysisResource extends Resource
 {
     protected static ?string $model = AIAnalysis::class;
 
-    protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedRectangleStack;
+    protected static ?string $modelLabel = 'تحليل ذكاء اصطناعي';
+
+    protected static ?string $pluralModelLabel = 'تحليلات الذكاء الاصطناعي';
+
+    protected static ?string $navigationLabel = 'تحليلات الذكاء الاصطناعي';
+
+    protected static string | UnitEnum | null $navigationGroup = 'ذكاء الأعمال والتحليلات';
+
+    protected static ?int $navigationSort = 1;
+
+    protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedCpuChip;
+
+    public static function getNavigationBadge(): ?string
+    {
+        return (string) static::getModel()::count();
+    }
+
+    public static function getNavigationBadgeColor(): string|array|null
+    {
+        return 'warning';
+    }
 
     public static function form(Schema $schema): Schema
     {

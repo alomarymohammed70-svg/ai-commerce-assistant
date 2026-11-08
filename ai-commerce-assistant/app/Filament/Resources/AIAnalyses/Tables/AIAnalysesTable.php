@@ -16,53 +16,69 @@ class AIAnalysesTable
         return $table
             ->columns([
                 TextColumn::make('canonicalProduct.name')
-                    ->searchable(),
-                TextColumn::make('productListing.title')
-                    ->searchable(),
-                TextColumn::make('user.name')
-                    ->searchable(),
-                TextColumn::make('provider')
-                    ->searchable(),
-                TextColumn::make('model')
-                    ->searchable(),
-                TextColumn::make('prompt_version')
-                    ->searchable(),
+                    ->label('المنتج المعياري')
+                    ->searchable()
+                    ->weight('bold')
+                    ->limit(25),
                 TextColumn::make('decision')
+                    ->label('قرار الذكاء الاصطناعي')
+                    ->badge()
+                    ->color(fn (string $state): string => match (strtoupper($state)) {
+                        'BUY', 'شراء' => 'success',
+                        'AVOID', 'تجنب' => 'danger',
+                        'WATCH', 'مراقبة' => 'warning',
+                        default => 'info',
+                    })
                     ->searchable(),
                 TextColumn::make('opportunity_score')
-                    ->numeric()
+                    ->label('مؤشر الفرصة (%)')
+                    ->numeric(1)
+                    ->badge()
+                    ->color('primary')
                     ->sortable(),
                 TextColumn::make('risk_score')
-                    ->numeric()
+                    ->label('مؤشر المخاطرة')
+                    ->numeric(1)
+                    ->badge()
+                    ->color('danger')
                     ->sortable(),
                 TextColumn::make('confidence')
+                    ->label('درجة الثقة')
+                    ->numeric(2)
+                    ->sortable(),
+                TextColumn::make('provider')
+                    ->label('مزود الذكاء الاصطناعي')
+                    ->badge()
+                    ->color('gray')
+                    ->searchable(),
+                TextColumn::make('model')
+                    ->label('موديل الذكاء الاصطناعي')
+                    ->badge()
+                    ->color('gray')
+                    ->searchable(),
+                TextColumn::make('tokens_used')
+                    ->label('التوكنز المستهلكة')
                     ->numeric()
                     ->sortable(),
                 TextColumn::make('duration_ms')
-                    ->numeric()
-                    ->sortable(),
-                TextColumn::make('tokens_used')
+                    ->label('زمن الاستجابة (ms)')
                     ->numeric()
                     ->sortable(),
                 TextColumn::make('created_at')
-                    ->dateTime()
-                    ->sortable()
-                    ->toggleable(isToggledHiddenByDefault: true),
-                TextColumn::make('updated_at')
-                    ->dateTime()
-                    ->sortable()
-                    ->toggleable(isToggledHiddenByDefault: true),
+                    ->label('تاريخ التحليل')
+                    ->dateTime('d/m/Y H:i')
+                    ->sortable(),
             ])
             ->filters([
                 //
             ])
             ->recordActions([
-                ViewAction::make(),
-                EditAction::make(),
+                ViewAction::make()->label('عرض'),
+                EditAction::make()->label('تعديل'),
             ])
             ->toolbarActions([
                 BulkActionGroup::make([
-                    DeleteBulkAction::make(),
+                    DeleteBulkAction::make()->label('حذف المحدد'),
                 ]),
             ]);
     }
