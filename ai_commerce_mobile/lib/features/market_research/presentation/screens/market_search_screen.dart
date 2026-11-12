@@ -239,11 +239,15 @@ class _MarketSearchScreenState extends ConsumerState<MarketSearchScreen> {
                       ),
                       const Spacer(),
                       Text(
-                        CurrencyFormatter.format(item.price, currency: item.currency),
-                        style: const TextStyle(
+                        item.price != null
+                            ? CurrencyFormatter.format(item.price, currency: item.currency)
+                            : 'غير متاح',
+                        style: TextStyle(
                           fontSize: 17,
                           fontWeight: FontWeight.bold,
-                          color: AppColors.primary,
+                          color: item.price != null
+                              ? AppColors.primary
+                              : AppColors.textSecondaryLight,
                         ),
                       ),
                     ],
@@ -261,10 +265,14 @@ class _MarketSearchScreenState extends ConsumerState<MarketSearchScreen> {
                       const Icon(Icons.inventory_2_outlined, size: 14, color: AppColors.textSecondaryLight),
                       const SizedBox(width: 4),
                       Text(
-                        item.isAvailable ? 'متوفر بالسوق' : 'غير متوفر حالياً',
+                        item.isAvailable == null
+                            ? 'غير متاح'
+                            : (item.isAvailable! ? 'متوفر بالسوق' : 'غير متوفر حالياً'),
                         style: TextStyle(
                           fontSize: 12,
-                          color: item.isAvailable ? AppColors.decisionBuy : AppColors.error,
+                          color: item.isAvailable == null
+                              ? AppColors.textSecondaryLight
+                              : (item.isAvailable! ? AppColors.decisionBuy : AppColors.error),
                         ),
                       ),
                       const Spacer(),

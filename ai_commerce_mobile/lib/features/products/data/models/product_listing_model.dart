@@ -1,3 +1,28 @@
+class ListingSellerModel {
+  final String? username;
+  final String? storeName;
+  final double? feedbackPercentage;
+  final int? feedbackScore;
+
+  const ListingSellerModel({
+    this.username,
+    this.storeName,
+    this.feedbackPercentage,
+    this.feedbackScore,
+  });
+
+  String? get displayName => username ?? storeName;
+
+  factory ListingSellerModel.fromJson(Map<String, dynamic> json) {
+    return ListingSellerModel(
+      username: _parseNullableString(json['username']),
+      storeName: _parseNullableString(json['store_name']),
+      feedbackPercentage: _parseNullableDouble(json['feedback_percentage']),
+      feedbackScore: _parseNullableInt(json['feedback_score']),
+    );
+  }
+}
+
 class ProductListingModel {
   final int id;
   final int? canonicalProductId;
@@ -7,17 +32,16 @@ class ProductListingModel {
   final String? brand;
   final String sourceCode;
   final String sourceName;
-  final double price;
+  final double? price;
   final String currency;
   final double? originalPrice;
   final double? rating;
   final int reviewsCount;
-  final bool isAvailable;
+  final bool? isAvailable;
   final String? url;
   final String? imageUrl;
-  final String? supplierUsername;
-  final double? sellerFeedbackPercentage;
-  final int? sellerFeedbackScore;
+  final String? observedAt;
+  final ListingSellerModel? seller;
 
   const ProductListingModel({
     required this.id,
@@ -28,54 +52,83 @@ class ProductListingModel {
     this.brand,
     required this.sourceCode,
     required this.sourceName,
-    required this.price,
+    this.price,
     required this.currency,
     this.originalPrice,
     this.rating,
     required this.reviewsCount,
-    required this.isAvailable,
+    this.isAvailable,
     this.url,
     this.imageUrl,
-    this.supplierUsername,
-    this.sellerFeedbackPercentage,
-    this.sellerFeedbackScore,
+    this.observedAt,
+    this.seller,
   });
 
   factory ProductListingModel.fromJson(Map<String, dynamic> json) {
-    final raw = json['raw_payload'] is Map ? json['raw_payload'] as Map<String, dynamic> : {};
-    final seller = raw['seller'] is Map ? raw['seller'] as Map<String, dynamic> : {};
+    final sourceMap = json['source'] is Map
+        ? Map<String, dynamic>.from(json['source'] as Map)
+        : null;
+
+    final rawSeller = json['seller'];
+    final seller = rawSeller is Map
+        ? ListingSellerModel.fromJson(Map<String, dynamic>.from(rawSeller))
+        : null;
 
     return ProductListingModel(
-      id: json['id'] as int? ?? 0,
-      canonicalProductId: json['canonical_product_id'] as int?,
+      id: _parseInt(json['id']),
+      canonicalProductId: _parseNullableInt(json['canonical_product_id']),
       externalId: json['external_id']?.toString() ?? '',
       title: json['title']?.toString() ?? '',
-      description: json['description']?.toString(),
-      brand: json['brand']?.toString(),
-      sourceCode: json['source']?['code']?.toString() ?? 'ebay',
-      sourceName: json['source']?['name']?.toString() ?? 'eBay Marketplace',
-      price: double.tryParse(json['price']?.toString() ?? '0') ?? 0.0,
+      description: _parseNullableString(json['description']),
+      brand: _parseNullableString(json['brand']),
+      sourceCode: sourceMap?['code']?.toString() ?? '',
+      sourceName: sourceMap?['name']?.toString() ?? '',
+      price: _parseNullableDouble(json['price']),
       currency: json['currency']?.toString() ?? 'USD',
-      originalPrice: json['original_price'] != null
-          ? double.tryParse(json['original_price'].toString())
-          : null,
-      rating: json['rating'] != null ? double.tryParse(json['rating'].toString()) : null,
-      reviewsCount: json['reviews_count'] as int? ?? 0,
-      isAvailable: json['is_available'] as bool? ?? true,
-      url: json['url']?.toString(),
-      imageUrl: json['image_url']?.toString(),
-      supplierUsername: seller['username']?.toString() ?? raw['seller_username']?.toString(),
-      sellerFeedbackPercentage: raw['seller_feedback_percentage'] != null
-          ? double.tryParse(raw['seller_feedback_percentage'].toString())
-          : (seller['feedbackPercentage'] != null
-              ? double.tryParse(seller['feedbackPercentage'].toString())
-              : null),
-      sellerFeedbackScore: raw['seller_feedback_score'] != null
-          ? int.tryParse(raw['seller_feedback_score'].toString())
-          : (seller['feedbackScore'] != null
-              ? int.tryParse(seller['feedbackScore'].toString())
-              : null),
+      originalPrice: _parseNullableDouble(json['original_price']),
+      rating: _parseNullableDouble(json['rating']),
+      reviewsCount: _parseInt(json['reviews_count']),
+      isAvailable: json['is_available'] is bool ? json['is_available'] as bool : null,
+      url: _parseNullableString(json['url']),
+      imageUrl: _parseNullableString(json['image_url']),
+      observedAt: _parseNullableString(json['observed_at']),
+      seller: seller,
     );
   }
 }
 
+int _parseInt(dynamic value, {int fallback = 0}) {
+  if (value is int) return value;
+  if (value is num) return value.toInt();
+  if (value is String) return int.tryParse(value.trim()) ?? fallback;
+  return fallback;
+}
+
+int? _parseNullableInt(dynamic value) {
+  if (value == null) return null;
+  if (value is int) return value;
+  if (value is num) return value.toInt();
+  if (value is String) return int.tryParse(value.trim());
+  return null;
+}
+
+double? _parseNullableDouble(dynamic value) {
+  if (value == null || value is bool) return null;
+  if (value is num) {
+    final parsed = value.toDouble();
+    return parsed.isFinite ? parsed : null;
+  }
+  if (value is String) {
+    final trimmed = value.trim();
+    if (trimmed.isEmpty) return null;
+    final parsed = double.tryParse(trimmed);
+    return (parsed != null && parsed.isFinite) ? parsed : null;
+  }
+  return null;
+}
+
+String? _parseNullableString(dynamic value) {
+  if (value == null) return null;
+  final str = value.toString().trim();
+  return str.isEmpty ? null : str;
+}

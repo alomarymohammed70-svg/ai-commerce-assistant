@@ -19,27 +19,30 @@ class PriceComparisonScreen extends ConsumerWidget {
       appBar: AppBar(
         title: const Text(AppStrings.priceComparison),
       ),
-      body: comparisonAsync.when(
-        loading: () => const Center(child: CircularProgressIndicator()),
-        error: (err, _) => Center(
-          child: Padding(
-            padding: const EdgeInsets.all(24.0),
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                const Icon(Icons.error_outline, size: 48, color: AppColors.error),
-                const SizedBox(height: 12),
-                Text(err.toString(), textAlign: TextAlign.center, style: const TextStyle(color: AppColors.error)),
-                const SizedBox(height: 16),
-                ElevatedButton(
-                  onPressed: () => ref.refresh(priceComparisonProvider(productId)),
-                  child: const Text(AppStrings.retry),
-                ),
-              ],
+      body: Directionality(
+        textDirection: TextDirection.rtl,
+        child: comparisonAsync.when(
+          loading: () => const Center(child: CircularProgressIndicator()),
+          error: (err, _) => Center(
+            child: Padding(
+              padding: const EdgeInsets.all(24.0),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  const Icon(Icons.error_outline, size: 48, color: AppColors.error),
+                  const SizedBox(height: 12),
+                  Text(err.toString(), textAlign: TextAlign.center, style: const TextStyle(color: AppColors.error)),
+                  const SizedBox(height: 16),
+                  ElevatedButton(
+                    onPressed: () => ref.invalidate(priceComparisonProvider(productId)),
+                    child: const Text(AppStrings.retry),
+                  ),
+                ],
+              ),
             ),
           ),
+          data: (comparison) => _buildComparisonContent(context, comparison),
         ),
-        data: (comparison) => _buildComparisonContent(context, comparison),
       ),
     );
   }
@@ -58,7 +61,7 @@ class PriceComparisonScreen extends ConsumerWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    data.productName,
+                    data.canonicalProductName,
                     style: const TextStyle(fontSize: 17, fontWeight: FontWeight.bold),
                   ),
                   const SizedBox(height: 8),
@@ -72,37 +75,78 @@ class PriceComparisonScreen extends ConsumerWidget {
           ),
           const SizedBox(height: 12),
 
-          // Price Spread Arbitrage Metric Card
+          // Price Spread & Summary Metrics Card
           Card(
             color: AppColors.primary.withValues(alpha: 0.05),
             child: Padding(
               padding: const EdgeInsets.all(16),
-              child: Row(
+              child: Column(
                 children: [
-                  Container(
-                    padding: const EdgeInsets.all(10),
-                    decoration: BoxDecoration(
-                      color: AppColors.primary.withValues(alpha: 0.1),
-                      shape: BoxShape.circle,
-                    ),
-                    child: const Icon(Icons.trending_up_rounded, color: AppColors.primary),
+                  Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(10),
+                        decoration: BoxDecoration(
+                          color: AppColors.primary.withValues(alpha: 0.1),
+                          shape: BoxShape.circle,
+                        ),
+                        child: const Icon(Icons.trending_up_rounded, color: AppColors.primary),
+                      ),
+                      const SizedBox(width: 14),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text(
+                              AppStrings.priceSpread,
+                              style: TextStyle(fontSize: 12, color: AppColors.textSecondaryLight),
+                            ),
+                            Text(
+                              data.priceSpread != null
+                                  ? CurrencyFormatter.format(data.priceSpread, currency: data.targetCurrency)
+                                  : 'غير متاح',
+                              style: TextStyle(
+                                fontSize: 20,
+                                fontWeight: FontWeight.bold,
+                                color: data.priceSpread != null
+                                    ? AppColors.primary
+                                    : AppColors.textSecondaryLight,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.end,
+                        children: [
+                          const Text(
+                            'هامش الربح الإجمالي المحتمل',
+                            style: TextStyle(fontSize: 11, color: AppColors.textSecondaryLight),
+                          ),
+                          Text(
+                            CurrencyFormatter.formatPercent(data.potentialGrossMarginPercentage),
+                            style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: AppColors.buy),
+                          ),
+                        ],
+                      ),
+                    ],
                   ),
-                  const SizedBox(width: 14),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
+                  if (data.totalOffers > 0) ...[
+                    const Divider(height: 20),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        const Text(
-                          AppStrings.priceSpread,
-                          style: TextStyle(fontSize: 12, color: AppColors.textSecondaryLight),
+                        Text(
+                          'متوسط السعر: ${data.averagePrice != null ? CurrencyFormatter.format(data.averagePrice, currency: data.targetCurrency) : 'غير متاح'}',
+                          style: const TextStyle(fontSize: 12, color: AppColors.textSecondaryLight),
                         ),
                         Text(
-                          CurrencyFormatter.format(data.maxPriceSpread, currency: data.targetCurrency),
-                          style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: AppColors.primary),
+                          'نسبة الفارق: ${CurrencyFormatter.formatPercent(data.priceSpreadPercentage)}',
+                          style: const TextStyle(fontSize: 12, color: AppColors.textSecondaryLight),
                         ),
                       ],
                     ),
-                  ),
+                  ],
                 ],
               ),
             ),
@@ -111,7 +155,7 @@ class PriceComparisonScreen extends ConsumerWidget {
 
           // Offers List
           Text(
-            '${AppStrings.marketOffers} (${data.offersCount})',
+            '${AppStrings.marketOffers} (${data.totalOffers})',
             style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
           ),
           const SizedBox(height: 10),
@@ -133,11 +177,14 @@ class PriceComparisonScreen extends ConsumerWidget {
   }
 
   Widget _buildOfferComparisonCard(ComparisonOfferModel offer, String targetCurrency) {
+    final sellerLabel = offer.seller?.displayName ?? AppStrings.dataUnavailable;
+
     return Card(
       margin: const EdgeInsets.only(bottom: 12),
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Row(
               children: [
@@ -148,19 +195,33 @@ class PriceComparisonScreen extends ConsumerWidget {
                     borderRadius: BorderRadius.circular(4),
                   ),
                   child: Text(
-                    offer.source.toUpperCase(),
+                    offer.source.name.isNotEmpty
+                        ? offer.source.name
+                        : offer.source.code.toUpperCase(),
                     style: const TextStyle(color: Colors.blue, fontWeight: FontWeight.bold, fontSize: 11),
                   ),
                 ),
                 const SizedBox(width: 8),
-                Text(
-                  offer.sellerUsername ?? 'بائع معتمد',
-                  style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500),
+                Expanded(
+                  child: Text(
+                    sellerLabel,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500),
+                  ),
                 ),
-                const Spacer(),
+                const SizedBox(width: 8),
                 Text(
-                  CurrencyFormatter.format(offer.convertedPrice, currency: targetCurrency),
-                  style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: AppColors.primary),
+                  offer.normalizedPrice != null
+                      ? CurrencyFormatter.format(offer.normalizedPrice, currency: targetCurrency)
+                      : 'غير متاح',
+                  style: TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                    color: offer.normalizedPrice != null
+                        ? AppColors.primary
+                        : AppColors.textSecondaryLight,
+                  ),
                 ),
               ],
             ),
@@ -169,19 +230,20 @@ class PriceComparisonScreen extends ConsumerWidget {
               Align(
                 alignment: Alignment.centerLeft,
                 child: Text(
-                  'السعر الأصلي: ${CurrencyFormatter.format(offer.originalPrice, currency: offer.originalCurrency)}',
+                  'السعر الأصلي: ${offer.originalPrice != null ? CurrencyFormatter.format(offer.originalPrice, currency: offer.originalCurrency) : 'غير متاح'}',
                   style: const TextStyle(fontSize: 11, color: AppColors.textSecondaryLight),
                 ),
               ),
             ],
-            if (offer.sellerFeedbackPercentage != null) ...[
+            if (offer.seller?.feedbackPercentage != null || offer.seller?.feedbackScore != null) ...[
               const Divider(height: 16),
               Row(
                 children: [
                   const Icon(Icons.star_rounded, size: 14, color: Colors.amber),
                   const SizedBox(width: 4),
                   Text(
-                    'تقييم البائع بالمتجر: ${offer.sellerFeedbackPercentage}%',
+                    'تقييم البائع بالمتجر: ${offer.seller?.feedbackPercentage != null ? CurrencyFormatter.formatPercent(offer.seller!.feedbackPercentage!) : AppStrings.dataUnavailable}'
+                    '${offer.seller?.feedbackScore != null ? ' (${offer.seller!.feedbackScore})' : ''}',
                     style: const TextStyle(fontSize: 11, color: AppColors.textSecondaryLight),
                   ),
                 ],

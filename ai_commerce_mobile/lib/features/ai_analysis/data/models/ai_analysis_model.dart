@@ -9,12 +9,12 @@ class AIAnalysisModel {
   final String model;
   final String promptVersion;
   final String decision;
-  final double confidence;
-  final double opportunityScore;
-  final double riskScore;
+  final double? confidence;
+  final double? opportunityScore;
+  final double? riskScore;
   final AIAnalysisDetail analysis;
   final FinancialMetricsModel deterministicMetrics;
-  final int durationMs;
+  final double? durationMs;
   final int tokensUsed;
   final DateTime? createdAt;
 
@@ -26,15 +26,30 @@ class AIAnalysisModel {
     required this.model,
     required this.promptVersion,
     required this.decision,
-    required this.confidence,
-    required this.opportunityScore,
-    required this.riskScore,
+    this.confidence,
+    this.opportunityScore,
+    this.riskScore,
     required this.analysis,
     required this.deterministicMetrics,
-    required this.durationMs,
+    this.durationMs,
     required this.tokensUsed,
     this.createdAt,
   });
+
+  static double? _parseNullableDouble(dynamic value) {
+    if (value == null) return null;
+    if (value is num) {
+      final parsed = value.toDouble();
+      return parsed.isFinite ? parsed : null;
+    }
+    if (value is String) {
+      final trimmed = value.trim();
+      if (trimmed.isEmpty) return null;
+      final parsed = double.tryParse(trimmed);
+      return (parsed != null && parsed.isFinite) ? parsed : null;
+    }
+    return null;
+  }
 
   factory AIAnalysisModel.fromJson(Map<String, dynamic> json) {
     return AIAnalysisModel(
@@ -49,15 +64,9 @@ class AIAnalysisModel {
       model: json['model']?.toString() ?? 'gpt-4o-mini',
       promptVersion: json['prompt_version']?.toString() ?? 'v1',
       decision: json['decision']?.toString() ?? 'INSUFFICIENT_DATA',
-      confidence: (json['confidence'] is num)
-          ? (json['confidence'] as num).toDouble()
-          : double.tryParse(json['confidence']?.toString() ?? '0') ?? 0.0,
-      opportunityScore: (json['opportunity_score'] is num)
-          ? (json['opportunity_score'] as num).toDouble()
-          : double.tryParse(json['opportunity_score']?.toString() ?? '0') ?? 0.0,
-      riskScore: (json['risk_score'] is num)
-          ? (json['risk_score'] as num).toDouble()
-          : double.tryParse(json['risk_score']?.toString() ?? '0') ?? 0.0,
+      confidence: _parseNullableDouble(json['confidence']),
+      opportunityScore: _parseNullableDouble(json['opportunity_score']),
+      riskScore: _parseNullableDouble(json['risk_score']),
       analysis: AIAnalysisDetail.fromJson(
         json['analysis'] is Map<String, dynamic> ? json['analysis'] : {},
       ),
@@ -66,9 +75,7 @@ class AIAnalysisModel {
             ? json['deterministic_metrics']
             : {},
       ),
-      durationMs: json['duration_ms'] is int
-          ? json['duration_ms'] as int
-          : int.tryParse(json['duration_ms']?.toString() ?? '0') ?? 0,
+      durationMs: _parseNullableDouble(json['duration_ms']),
       tokensUsed: json['tokens_used'] is int
           ? json['tokens_used'] as int
           : int.tryParse(json['tokens_used']?.toString() ?? '0') ?? 0,

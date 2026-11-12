@@ -20,9 +20,27 @@ class User extends Authenticatable implements FilamentUser
     /** @use HasFactory<UserFactory> */
     use HasApiTokens, HasFactory, Notifiable;
 
+    public const string ROLE_USER = 'user';
+
+    public const string ROLE_ADMIN = 'admin';
+
+    /**
+     * Default model attributes ensuring all new users start as regular non-admin users.
+     *
+     * @var array<string, mixed>
+     */
+    protected $attributes = [
+        'role' => self::ROLE_USER,
+    ];
+
+    public function isAdmin(): bool
+    {
+        return $this->role === self::ROLE_ADMIN;
+    }
+
     public function canAccessPanel(Panel $panel): bool
     {
-        return true;
+        return $panel->getId() === 'admin' && $this->isAdmin();
     }
 
     /**

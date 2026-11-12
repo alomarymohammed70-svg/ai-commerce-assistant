@@ -3,9 +3,14 @@
 namespace App\Providers;
 
 use App\Contracts\Currency\CurrencyConverterInterface;
+use App\Models\AIAnalysis;
+use App\Models\ProductMetric;
+use App\Policies\AIAnalysisPolicy;
+use App\Policies\ProductMetricPolicy;
 use App\Services\Currency\StaticCurrencyConverter;
 use App\Services\ExternalSources\ExternalSourceManager;
 use App\Services\ExternalSources\ProductNormalizationService;
+use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\ServiceProvider;
 
 class AppServiceProvider extends ServiceProvider
@@ -31,6 +36,7 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
-        //
+        Gate::policy(AIAnalysis::class, AIAnalysisPolicy::class);
+        Gate::policy(ProductMetric::class, ProductMetricPolicy::class);
     }
 }

@@ -63,8 +63,8 @@ Route::prefix('v1')->group(function () {
         Route::get('/listings', [ProductListingController::class, 'index']);
         Route::get('/listings/{id}', [ProductListingController::class, 'show']);
 
-        // External Market Research (eBay Browse API Integration)
-        Route::prefix('market-research/ebay')->group(function () {
+        // External Market Research (eBay Browse API Integration - Requires Authenticated Session)
+        Route::prefix('market-research/ebay')->middleware('auth:sanctum')->group(function () {
             Route::get('/search', [EbayMarketResearchController::class, 'search']);
             Route::get('/items/{externalId}', [EbayMarketResearchController::class, 'show']);
         });

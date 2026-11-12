@@ -31,7 +31,7 @@ class AIResponseValidatorTest extends TestCase
             ],
             'profitability' => [
                 'profit' => '45.0000',
-                'margin' => '32.14%',
+                'margin' => 32.14,
                 'assessment' => 'Profitable spread.',
             ],
             'competition' => [
@@ -80,7 +80,7 @@ class AIResponseValidatorTest extends TestCase
                 'selling_price' => ['value' => (string) $selling],
                 'shipping_cost' => ['value' => '15.00', 'is_verified' => $shippingVerified],
                 'estimated_profit' => ['value' => $isProfitable ? '45.0000' : '-12.5000'],
-                'profit_margin_percent' => ['value' => $isProfitable ? '32.14%' : '-10.00%'],
+                'profit_margin_percent' => ['value' => $isProfitable ? 32.14 : -10.00],
             ],
             'deterministic_heuristics' => [
                 'opportunity_score' => ['value' => 78.5],
@@ -243,9 +243,122 @@ class AIResponseValidatorTest extends TestCase
 
         $validated = $this->validator->validate($response, $context);
 
-        // Exact Laravel calculated figures overwrite AI hallucination
+        // Exact Laravel calculated figures overwrite AI hallucination as numeric JSON type
         $this->assertEquals('45.0000', $validated['profitability']['profit']);
-        $this->assertEquals('32.14%', $validated['profitability']['margin']);
+        $this->assertIsFloat($validated['profitability']['margin']);
+        $this->assertSame(32.14, $validated['profitability']['margin']);
+    }
+
+    public function test_arbiter_normalizes_ai_percent_string_and_preserves_null_margin(): void
+    {
+        // Case C: AI sends "26.36%" without deterministic margin in context -> normalized to float 26.36
+        $response = $this->getSampleValidResponse();
+        $response['profitability']['margin'] = '26.36%';
+
+        $contextWithoutMargin = $this->getSampleContext(isProfitable: true);
+        unset($contextWithoutMargin['financial_analysis']['profit_margin_percent']);
+
+        $validated = $this->validator->validate($response, $contextWithoutMargin);
+        $this->assertIsFloat($validated['profitability']['margin']);
+        $this->assertSame(26.36, $validated['profitability']['margin']);
+
+        // Case E: Missing / null deterministic margin preserves null rather than falling back to "0%" or 0
+        $contextWithNullMargin = $this->getSampleContext(isProfitable: true);
+        $contextWithNullMargin['financial_analysis']['profit_margin_percent'] = ['value' => null];
+        $validatedNull = $this->validator->validate($response, $contextWithNullMargin);
+        $this->assertNull($validatedNull['profitability']['margin']);
+    }
+
+    public function test_arbiter_enforces_deterministic_opportunity_and_risk_scores_over_ai_values(): void
+    {
+        $response = $this->getSampleValidResponse();
+        $response['recommendation']['decision'] = 'BUY';
+        $response['recommendation']['confidence'] = 0.875;
+        $response['opportunity']['score'] = 99;
+        $response['opportunity']['level'] = 'HIGH';
+        $response['risk']['score'] = 1;
+        $response['risk']['level'] = 'LOW';
+
+        $context = $this->getSampleContext(isProfitable: true, offersCount: 2, purchase: 100.0, selling: 145.0, risk: 75.0, shippingVerified: true);
+        $context['deterministic_heuristics']['opportunity_score']['value'] = 42.5;
+
+        $validated = $this->validator->validate($response, $context);
+
+        $this->assertSame(42.5, $validated['opportunity']['score']);
+        $this->assertSame('LOW', $validated['opportunity']['level']);
+        $this->assertSame(75.0, $validated['risk']['score']);
+        $this->assertSame('HIGH', $validated['risk']['level']);
+        $this->assertSame('WATCH', $validated['recommendation']['decision']);
+        $this->assertSame(0.875, $validated['recommendation']['confidence']);
+    }
+
+    public function test_arbiter_caps_confidence_when_critical_data_is_insufficient(): void
+    {
+        // Case 1: Zero market offers with high AI confidence (even if shipping verified)
+        $response = $this->getSampleValidResponse();
+        $response['recommendation']['decision'] = 'INSUFFICIENT_DATA';
+        $response['recommendation']['confidence'] = 0.95;
+
+        $zeroOffersContext = $this->getSampleContext(isProfitable: true, offersCount: 0, shippingVerified: true);
+        $validatedZeroOffers = $this->validator->validate($response, $zeroOffersContext);
+        $this->assertSame(0.35, $validatedZeroOffers['recommendation']['confidence']);
+
+        // Case 2: Missing purchase price with AI trying WATCH + 0.90 confidence
+        $responseWatch = $this->getSampleValidResponse();
+        $responseWatch['recommendation']['decision'] = 'WATCH';
+        $responseWatch['recommendation']['confidence'] = 0.90;
+
+        $missingPurchaseContext = $this->getSampleContext(isProfitable: true, offersCount: 2, purchase: 0.0, shippingVerified: true);
+        $validatedMissingPurchase = $this->validator->validate($responseWatch, $missingPurchaseContext);
+        $this->assertSame(0.35, $validatedMissingPurchase['recommendation']['confidence']);
+
+        // Case 3: Missing selling price
+        $missingSellingContext = $this->getSampleContext(isProfitable: true, offersCount: 2, purchase: 100.0, selling: 0.0, shippingVerified: true);
+        $validatedMissingSelling = $this->validator->validate($responseWatch, $missingSellingContext);
+        $this->assertSame(0.35, $validatedMissingSelling['recommendation']['confidence']);
+
+        // Case 4: Valid AI confidence already <= 0.35 is preserved verbatim (e.g. 0.25)
+        $responseLow = $this->getSampleValidResponse();
+        $responseLow['recommendation']['decision'] = 'INSUFFICIENT_DATA';
+        $responseLow['recommendation']['confidence'] = 0.25;
+        $validatedLow = $this->validator->validate($responseLow, $zeroOffersContext);
+        $this->assertSame(0.25, $validatedLow['recommendation']['confidence']);
+    }
+
+    public function test_arbiter_overrules_buy_and_clears_hallucinated_financials_when_selling_price_is_null(): void
+    {
+        $response = $this->getSampleValidResponse();
+        $response['recommendation']['decision'] = 'BUY';
+        $response['recommendation']['confidence'] = 0.92;
+        $response['profitability']['profit'] = '269.9955';
+        $response['profitability']['margin'] = '31.03%';
+
+        $contextMissingSelling = [
+            'market' => [
+                'offers_count' => 1,
+            ],
+            'financial_analysis' => [
+                'is_profitable' => ['value' => null, 'truth' => null],
+                'purchase_price' => ['value' => '599.9900', 'truth' => 'OBSERVED'],
+                'selling_price' => ['value' => null, 'truth' => null, 'status' => 'DATA_UNAVAILABLE'],
+                'shipping_cost' => ['value' => '0.0000', 'is_verified' => false],
+                'estimated_profit' => ['value' => null, 'truth' => null, 'status' => 'INSUFFICIENT_DATA'],
+                'profit_margin_percent' => ['value' => null, 'truth' => null],
+                'return_on_investment_percent' => ['value' => null, 'truth' => null],
+            ],
+            'deterministic_heuristics' => [
+                'opportunity_score' => ['value' => 45.0],
+                'risk_score' => ['value' => 75.0],
+                'competition_level' => ['value' => 'LOW'],
+            ],
+        ];
+
+        $validated = $this->validator->validate($response, $contextMissingSelling);
+
+        $this->assertSame('INSUFFICIENT_DATA', $validated['recommendation']['decision']);
+        $this->assertSame(0.35, $validated['recommendation']['confidence']);
+        $this->assertSame('DATA_UNAVAILABLE', $validated['profitability']['profit']);
+        $this->assertNull($validated['profitability']['margin']);
     }
 }
 

@@ -2,6 +2,7 @@
 
 namespace Tests\Unit;
 
+use App\DTOs\Comparison\ListingOfferComparisonDto;
 use App\Models\CanonicalProduct;
 use App\Models\ProductListing;
 use App\Models\ProductSource;
@@ -130,6 +131,80 @@ class PriceComparisonTest extends TestCase
         $this->assertNull($result->highestOffer);
         $this->assertEquals('0.0000', $result->priceSpread);
         $this->assertEmpty($result->offers);
+    }
+
+    public function test_offer_dto_includes_safe_seller_summary_and_allows_null_when_absent(): void
+    {
+        $canonical = CanonicalProduct::factory()->create([
+            'name' => 'Seller DTO Check',
+            'base_currency' => 'USD',
+        ]);
+
+        $ebay = ProductSource::factory()->create(['code' => 'ebay', 'name' => 'eBay Marketplace']);
+        $amazon = ProductSource::factory()->create(['code' => 'amazon', 'name' => 'Amazon Marketplace']);
+
+        ProductListing::factory()->create([
+            'canonical_product_id' => $canonical->id,
+            'source_id' => $ebay->id,
+            'price' => 40.0000,
+            'currency' => 'USD',
+            'is_available' => true,
+            'raw_payload' => [
+                'seller' => [
+                    'username' => 'pro_seller',
+                    'store_name' => 'Pro Electronics',
+                    'feedback_percentage' => 98.765,
+                    'feedback_score' => 1540,
+                ],
+                'internal_token' => 'secret-token',
+            ],
+        ]);
+
+        ProductListing::factory()->create([
+            'canonical_product_id' => $canonical->id,
+            'source_id' => $amazon->id,
+            'price' => 60.0000,
+            'currency' => 'USD',
+            'is_available' => true,
+            'raw_payload' => ['mock' => true],
+        ]);
+
+        $result = $this->service->compare($canonical, 'USD');
+        $serialized = $result->toArray();
+
+        $this->assertSame('pro_seller', $serialized['offers'][0]['seller']['username']);
+        $this->assertSame('Pro Electronics', $serialized['offers'][0]['seller']['store_name']);
+        $this->assertSame(98.77, $serialized['offers'][0]['seller']['feedback_percentage']);
+        $this->assertSame(1540, $serialized['offers'][0]['seller']['feedback_score']);
+        $this->assertArrayNotHasKey('raw_payload', $serialized['offers'][0]);
+        $this->assertStringNotContainsString('secret-token', json_encode($serialized));
+
+        $this->assertNull($serialized['offers'][1]['seller']);
+
+        $nullableUrlDto = new ListingOfferComparisonDto(
+            listingId: 99,
+            sourceId: 1,
+            sourceCode: 'ebay',
+            sourceName: 'eBay Marketplace',
+            externalId: 'ext-99',
+            title: 'No URL Offer',
+            url: null,
+            imageUrl: null,
+            originalPrice: '25.0000',
+            originalCurrency: 'USD',
+            normalizedPrice: '25.0000',
+            targetCurrency: 'USD',
+            exchangeRate: '1.000000',
+            rating: null,
+            reviewsCount: 0,
+            isAvailable: true,
+            observedAt: null,
+            seller: null,
+        );
+
+        $dtoArray = $nullableUrlDto->toArray();
+        $this->assertNull($dtoArray['url']);
+        $this->assertNull($dtoArray['seller']);
     }
 }
 

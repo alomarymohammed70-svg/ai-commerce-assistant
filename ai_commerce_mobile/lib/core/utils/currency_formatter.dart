@@ -15,28 +15,46 @@ class CurrencyFormatter {
   }
 
   static String formatUsd(dynamic amount) {
-    if (amount == null) return '\$0.00';
+    if (amount == null || amount is bool) return 'غير متاح';
     double? val;
     if (amount is num) {
       val = amount.toDouble();
     } else if (amount is String) {
-      val = double.tryParse(amount);
+      final trimmed = amount.trim();
+      if (trimmed.isNotEmpty) {
+        val = double.tryParse(trimmed);
+      }
     }
-    val ??= 0.0;
+    if (val == null || !val.isFinite) return 'غير متاح';
+    if (val == 0) val = 0.0;
     return '\$${_formatWithCommas(val)}';
   }
 
   static String formatPercent(dynamic percent) {
-    if (percent == null) return '0.0%';
-    if (percent is String) {
-      if (percent.endsWith('%')) return percent;
-      final val = double.tryParse(percent);
-      return val != null ? '${val.toStringAsFixed(1)}%' : percent;
-    }
+    if (percent == null || percent is bool) return 'غير متاح';
     if (percent is num) {
-      return '${percent.toStringAsFixed(1)}%';
+      final val = percent.toDouble();
+      if (!val.isFinite) return 'غير متاح';
+      if (val == 0) return '0%';
+      return '${val.toStringAsFixed(1)}%';
     }
-    return '$percent%';
+    if (percent is String) {
+      final trimmed = percent.trim();
+      if (trimmed.isEmpty) return 'غير متاح';
+      if (trimmed.endsWith('%')) {
+        final numericPart = trimmed.substring(0, trimmed.length - 1).trim();
+        if (numericPart.isEmpty) return 'غير متاح';
+        final parsed = double.tryParse(numericPart);
+        if (parsed == null || !parsed.isFinite) return 'غير متاح';
+        if (parsed == 0) return '0%';
+        return trimmed;
+      }
+      final val = double.tryParse(trimmed);
+      if (val == null || !val.isFinite) return 'غير متاح';
+      if (val == 0) return '0%';
+      return '${val.toStringAsFixed(1)}%';
+    }
+    return 'غير متاح';
   }
 
   static String _formatWithCommas(double value) {

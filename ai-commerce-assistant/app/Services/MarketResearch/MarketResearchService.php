@@ -4,11 +4,14 @@ namespace App\Services\MarketResearch;
 
 use App\Contracts\Marketplaces\MarketConnectorInterface;
 use App\DTOs\ExternalSources\ExternalProductDto;
+use App\Exceptions\Ebay\EbayIntegrationException;
 use App\Models\ProductListing;
 use App\Services\ExternalSources\Connectors\EbayConnector;
 use App\Services\ExternalSources\Connectors\MockEbayConnector;
+use App\Services\ExternalSources\Ebay\EbayAuthService;
 use App\Services\ExternalSources\Normalizers\EbayProductNormalizer;
 use App\Services\Product\ProductIngestionService;
+use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
 
@@ -22,22 +25,99 @@ class MarketResearchService
 
     /**
      * Resolve the active eBay connector based on configuration and environment mode.
+     * In production, server configuration (services.ebay.mode) strictly overrides any driverOverride,
+     * mock mode is forbidden, and missing credentials fail closed instead of falling back to Mock.
+     *
+     * @throws EbayIntegrationException
      */
     public function resolveConnector(?string $driverOverride = null): MarketConnectorInterface
     {
-        if ($this->connector !== null && $driverOverride === null) {
+        $isProduction = app()->environment('production');
+        $effectiveOverride = $driverOverride;
+
+        if ($isProduction) {
+            if ($effectiveOverride !== null && trim($effectiveOverride) !== '') {
+                Log::warning('ebay.service_driver_override_blocked_in_production', [
+                    'requested_driver' => $effectiveOverride,
+                    'configured_mode' => config('services.ebay.mode', 'production'),
+                ]);
+            }
+            $effectiveOverride = null;
+        }
+
+        if ($this->connector !== null && ($effectiveOverride === null || trim($effectiveOverride) === '')) {
+            if ($isProduction && $this->connector instanceof MockEbayConnector) {
+                Log::error('ebay.mock_connector_blocked_in_production');
+
+                throw new EbayIntegrationException(
+                    'Mock eBay connector is not permitted in production.',
+                    503
+                );
+            }
+
             return $this->connector;
         }
 
-        $mode = strtolower((string) ($driverOverride ?? config('services.ebay.mode', 'mock')));
-        $hasCredentials = ! empty(config('services.ebay.client_id')) && ! empty(config('services.ebay.client_secret'));
+        $mode = $this->resolveEffectiveMode($effectiveOverride);
+        $hasCredentials = ! empty(trim((string) config('services.ebay.client_id')))
+            && ! empty(trim((string) config('services.ebay.client_secret')));
 
-        // If explicitly mock or credentials not configured, use Mock connector
+        if ($isProduction) {
+            if (! in_array($mode, ['sandbox', 'production'], true)) {
+                Log::error('ebay.mock_mode_blocked_in_production', [
+                    'configured_mode' => $mode,
+                ]);
+
+                throw new EbayIntegrationException(
+                    'eBay integration cannot run in mock or unconfigured mode in production. Set EBAY_MODE=production and provide valid eBay credentials.',
+                    503
+                );
+            }
+
+            if (! $hasCredentials) {
+                Log::error('ebay.missing_credentials_in_production', [
+                    'configured_mode' => $mode,
+                ]);
+
+                throw new EbayIntegrationException(
+                    'eBay API credentials (EBAY_CLIENT_ID / EBAY_CLIENT_SECRET) are missing in production and cannot fall back to mock.',
+                    503
+                );
+            }
+
+            return new EbayConnector(
+                authService: new EbayAuthService(mode: $mode),
+                mode: $mode
+            );
+        }
+
+        // Non-production (local / testing): preserve mock behavior when explicitly mock or credentials absent
         if ($mode === 'mock' || ! $hasCredentials) {
             return new MockEbayConnector();
         }
 
-        return new EbayConnector();
+        $liveMode = in_array($mode, ['sandbox', 'production'], true) ? $mode : 'sandbox';
+
+        return new EbayConnector(
+            authService: new EbayAuthService(mode: $liveMode),
+            mode: $liveMode
+        );
+    }
+
+    protected function resolveEffectiveMode(?string $driverOverride = null): string
+    {
+        if (app()->environment('production') || $driverOverride === null || trim($driverOverride) === '') {
+            $defaultMode = app()->environment('production') ? 'production' : 'mock';
+            $configuredMode = config('services.ebay.mode');
+
+            if ($configuredMode === null || trim((string) $configuredMode) === '') {
+                return $defaultMode;
+            }
+
+            return strtolower(trim((string) $configuredMode));
+        }
+
+        return strtolower(trim($driverOverride));
     }
 
     /**
@@ -56,15 +136,17 @@ class MarketResearchService
         bool $shouldStore = true
     ): array {
         $startTime = microtime(true);
-        $connector = $this->resolveConnector($parameters['driver'] ?? null);
+        $requestedDriver = isset($parameters['driver']) ? (string) $parameters['driver'] : null;
+        $connector = $this->resolveConnector($requestedDriver);
+        $effectiveMode = $this->resolveEffectiveMode($requestedDriver);
 
         $limit = min(50, max(1, (int) ($parameters['limit'] ?? 10)));
         $offset = max(0, (int) ($parameters['offset'] ?? 0));
 
-        $normParams = $parameters;
+        $normParams = Arr::except($parameters, ['driver']);
         ksort($normParams);
         $marketplaceId = (string) config('services.ebay.marketplace_id', 'EBAY_US');
-        $cacheKey = 'ebay_search_' . md5($query . '_' . serialize($normParams) . '_' . $connector->getSourceIdentifier() . '_' . $marketplaceId);
+        $cacheKey = 'ebay_search_' . md5($query . '_' . serialize($normParams) . '_' . $connector->getSourceIdentifier() . '_' . $effectiveMode . '_' . $marketplaceId);
         $cacheTtl = (int) config('services.ebay.cache_ttl_search', 900);
 
         $isCached = false;
@@ -72,7 +154,7 @@ class MarketResearchService
             $rawResponse = Cache::get($cacheKey);
             $isCached = true;
         } else {
-            $rawResponse = $connector->searchRaw($query, $parameters);
+            $rawResponse = $connector->searchRaw($query, $normParams);
             Cache::put($cacheKey, $rawResponse, $cacheTtl);
         }
 
@@ -127,10 +209,12 @@ class MarketResearchService
         bool $shouldStore = true
     ): ?array {
         $startTime = microtime(true);
-        $connector = $this->resolveConnector($parameters['driver'] ?? null);
+        $requestedDriver = isset($parameters['driver']) ? (string) $parameters['driver'] : null;
+        $connector = $this->resolveConnector($requestedDriver);
+        $effectiveMode = $this->resolveEffectiveMode($requestedDriver);
 
         $marketplaceId = (string) config('services.ebay.marketplace_id', 'EBAY_US');
-        $cacheKey = 'ebay_item_' . $marketplaceId . '_' . rawurlencode($externalProductId);
+        $cacheKey = 'ebay_item_' . $marketplaceId . '_' . $effectiveMode . '_' . rawurlencode($externalProductId);
         $cacheTtl = (int) config('services.ebay.cache_ttl_item', 3600);
 
         $isCached = false;

@@ -81,11 +81,17 @@ class ProductListing extends Model
     }
 
     /**
-     * Latest calculated metric for this listing.
+     * Latest calculated metric for this listing visible to the current viewer (shared or own).
      */
-    public function latestMetric(): HasOne
+    public function latestMetric(?int $viewerId = null): HasOne
     {
-        return $this->hasOne(ProductMetric::class, 'product_id')->latestOfMany('calculated_at');
+        $resolvedViewerId = func_num_args() > 0 ? $viewerId : ProductMetric::resolveApiViewerId();
+
+        return $this->hasOne(ProductMetric::class, 'product_id')
+            ->ofMany(
+                ['calculated_at' => 'MAX', 'id' => 'MAX'],
+                fn (Builder $query) => $query->visibleTo($resolvedViewerId)
+            );
     }
 
     /**
@@ -149,6 +155,81 @@ class ProductListing extends Model
     {
         return $this->hasOne(AIAnalysis::class, 'product_listing_id')
             ->latestOfMany('created_at');
+    }
+
+    /**
+     * Build a safe, non-sensitive seller summary strictly from observed raw metadata.
+     * Returns null when no seller metadata exists instead of inventing placeholders.
+     *
+     * @return array{username: ?string, store_name: ?string, feedback_percentage: ?float, feedback_score: ?int}|null
+     */
+    public function extractSellerSummary(): ?array
+    {
+        $raw = is_array($this->raw_payload) ? $this->raw_payload : [];
+        $sellerNode = is_array($raw['seller'] ?? null) ? $raw['seller'] : [];
+
+        $username = $this->normalizeNullableString(
+            $sellerNode['username']
+            ?? $raw['seller_username']
+            ?? $raw['seller_name']
+            ?? $raw['supplier_name']
+            ?? null
+        );
+
+        $storeName = $this->normalizeNullableString(
+            $sellerNode['store_name']
+            ?? $sellerNode['storeName']
+            ?? $raw['store_name']
+            ?? $raw['company_name']
+            ?? null
+        );
+
+        $rawFeedbackPct = $sellerNode['feedbackPercentage']
+            ?? $sellerNode['feedback_percentage']
+            ?? $raw['seller_feedback_percentage']
+            ?? $raw['positive_feedback_percent']
+            ?? null;
+
+        $feedbackPercentage = is_numeric($rawFeedbackPct)
+            ? round((float) $rawFeedbackPct, 2)
+            : null;
+
+        $rawFeedbackScore = $sellerNode['feedbackScore']
+            ?? $sellerNode['feedback_score']
+            ?? $raw['seller_feedback_score']
+            ?? $raw['feedback_score']
+            ?? null;
+
+        $feedbackScore = is_numeric($rawFeedbackScore)
+            ? (int) $rawFeedbackScore
+            : null;
+
+        if (
+            $username === null
+            && $storeName === null
+            && $feedbackPercentage === null
+            && $feedbackScore === null
+        ) {
+            return null;
+        }
+
+        return [
+            'username' => $username,
+            'store_name' => $storeName,
+            'feedback_percentage' => $feedbackPercentage,
+            'feedback_score' => $feedbackScore,
+        ];
+    }
+
+    protected function normalizeNullableString(mixed $value): ?string
+    {
+        if (! is_string($value) && ! is_numeric($value)) {
+            return null;
+        }
+
+        $trimmed = trim((string) $value);
+
+        return $trimmed === '' ? null : $trimmed;
     }
 }
 

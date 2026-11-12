@@ -9,6 +9,8 @@ use App\Models\ProductSource;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Gate;
+use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
 
 class ProductResearchApiTest extends TestCase
@@ -72,12 +74,21 @@ class ProductResearchApiTest extends TestCase
                 'data' => [
                     '*' => [
                         'id',
-                        'external_id',
-                        'title',
-                        'price',
-                        'currency',
+                        'name',
+                        'slug',
+                        'brand',
+                        'base_currency',
+                        'price_summary' => [
+                            'lowest_price',
+                            'highest_price',
+                            'average_price',
+                            'currency',
+                        ],
+                        'active_listings_count',
+                        'total_listings_count',
                         'rating',
                         'reviews_count',
+                        'latest_opportunity_score',
                         'source',
                         'category',
                     ],
@@ -172,15 +183,33 @@ class ProductResearchApiTest extends TestCase
             ->assertJson([
                 'success' => true,
                 'data' => [
-                    'id' => $product->id,
-                    'title' => 'Detailed Test Product',
+                    'id' => $product->canonical_product_id,
+                    'name' => 'Detailed Test Product',
+                    'price_summary' => [
+                        'lowest_price' => '49.9900',
+                        'highest_price' => '49.9900',
+                        'average_price' => '49.9900',
+                        'currency' => 'USD',
+                    ],
+                    'active_listings_count' => 1,
+                    'total_listings_count' => 1,
+                    'latest_opportunity_score' => 82.5,
                 ],
             ])
             ->assertJsonStructure([
                 'data' => [
                     'id',
-                    'title',
+                    'name',
                     'description',
+                    'price_summary' => [
+                        'lowest_price',
+                        'highest_price',
+                        'average_price',
+                        'currency',
+                    ],
+                    'active_listings_count',
+                    'total_listings_count',
+                    'latest_opportunity_score',
                     'latest_metric' => ['opportunity_score', 'risk_score'],
                     'metrics_history',
                 ],
@@ -317,6 +346,256 @@ class ProductResearchApiTest extends TestCase
         // 5: eager load latest metrics
         // Total queries should be constant (~5) and strictly less than 10 products + 1
         $this->assertLessThanOrEqual(6, $queryCount);
+    }
+
+    public function test_personal_product_metric_is_owned_by_creator_and_cannot_spoof_user_id(): void
+    {
+        $userA = User::factory()->create();
+        $userB = User::factory()->create();
+        $product = Product::factory()->create([
+            'price' => 15.0000,
+            'rating' => 4.5,
+            'reviews_count' => 150,
+        ]);
+
+        Sanctum::actingAs($userA);
+
+        $response = $this->postJson("/api/v1/products/{$product->canonical_product_id}/analyze", [
+            'purchase_price' => 100.00,
+            'selling_price' => 200.00,
+            'shipping_cost' => 20.00,
+            'estimated_fees' => 10.00,
+            'user_id' => $userB->id,
+        ]);
+
+        $response->assertStatus(201);
+        $metricId = $response->json('data.id');
+
+        $this->assertDatabaseHas('product_metrics', [
+            'id' => $metricId,
+            'user_id' => $userA->id,
+            'purchase_price' => '100.0000',
+            'selling_price' => '200.0000',
+        ]);
+        $this->assertDatabaseMissing('product_metrics', [
+            'id' => $metricId,
+            'user_id' => $userB->id,
+        ]);
+    }
+
+    public function test_user_b_and_guests_cannot_see_user_a_private_financial_metrics_across_endpoints(): void
+    {
+        $userA = User::factory()->create();
+        $userB = User::factory()->create();
+
+        $listing = Product::factory()->create([
+            'title' => 'Isolated Financial Product',
+            'price' => 50.0000,
+        ]);
+        $canonicalId = $listing->canonical_product_id;
+
+        // Shared baseline metric (user_id = null) created at same second to test tie-breaking
+        $now = now()->startOfSecond();
+        $sharedMetric = ProductMetric::factory()->create([
+            'canonical_product_id' => $canonicalId,
+            'product_id' => $listing->id,
+            'user_id' => null,
+            'purchase_price' => 40.0000,
+            'selling_price' => 80.0000,
+            'shipping_cost' => 5.0000,
+            'estimated_fees' => 3.0000,
+            'calculated_at' => $now,
+        ]);
+
+        // User A analyzes the product with sensitive supplier costs (same second & later)
+        Sanctum::actingAs($userA);
+        $analyzeRes = $this->postJson("/api/v1/products/{$canonicalId}/analyze", [
+            'purchase_price' => 100.00,
+            'selling_price' => 200.00,
+            'shipping_cost' => 20.00,
+            'estimated_fees' => 10.00,
+        ]);
+        $analyzeRes->assertStatus(201);
+        $userAMetricId = $analyzeRes->json('data.id');
+
+        // 1. User A sees their own private financial inputs on product details & catalog
+        $userADetails = $this->getJson("/api/v1/products/{$canonicalId}");
+        $userADetails->assertStatus(200);
+        $this->assertSame($userAMetricId, $userADetails->json('data.latest_metric.id'));
+        $this->assertSame('100.0000', $userADetails->json('data.latest_metric.purchase_price'));
+
+        // 2. User B must NEVER see User A's private financial inputs anywhere, and MUST still see shared baseline
+        Sanctum::actingAs($userB);
+
+        $userBDetails = $this->getJson("/api/v1/products/{$canonicalId}");
+        $userBDetails->assertStatus(200);
+        $this->assertSame($sharedMetric->id, $userBDetails->json('data.latest_metric.id'));
+        $this->assertSame('40.0000', $userBDetails->json('data.latest_metric.purchase_price'));
+        $this->assertStringNotContainsString('100.0000', $userBDetails->getContent());
+        $this->assertStringNotContainsString('200.0000', $userBDetails->getContent());
+        $this->assertCount(1, $userBDetails->json('data.metrics_history'));
+
+        $userBList = $this->getJson('/api/v1/products');
+        $userBList->assertStatus(200);
+        $this->assertStringNotContainsString('100.0000', $userBList->getContent());
+        $this->assertSame($sharedMetric->id, $userBList->json('data.0.latest_metric.id'));
+
+        $userBListings = $this->getJson("/api/v1/products/{$canonicalId}/listings");
+        $userBListings->assertStatus(200);
+        $this->assertStringNotContainsString('100.0000', $userBListings->getContent());
+        $this->assertSame($sharedMetric->id, $userBListings->json('data.0.latest_metric.id'));
+
+        $userBListingShow = $this->getJson("/api/v1/listings/{$listing->id}");
+        $userBListingShow->assertStatus(200);
+        $this->assertSame($sharedMetric->id, $userBListingShow->json('data.latest_metric.id'));
+        $this->assertStringNotContainsString('100.0000', $userBListingShow->getContent());
+
+        // 3. Anonymous guest also sees only shared baseline metric and NEVER User A's data
+        $this->app['auth']->forgetGuards();
+        $this->flushHeaders();
+
+        $guestDetails = $this->getJson("/api/v1/products/{$canonicalId}");
+        $guestDetails->assertStatus(200);
+        $this->assertSame($sharedMetric->id, $guestDetails->json('data.latest_metric.id'));
+        $this->assertStringNotContainsString('100.0000', $guestDetails->getContent());
+        $this->assertCount(1, $guestDetails->json('data.metrics_history'));
+    }
+
+    public function test_when_no_shared_metric_exists_user_b_and_guests_receive_null_not_user_a_metric(): void
+    {
+        $userA = User::factory()->create();
+        $userB = User::factory()->create();
+
+        $listing = Product::factory()->create(['price' => 30.0000]);
+        $canonicalId = $listing->canonical_product_id;
+
+        Sanctum::actingAs($userA);
+        $this->postJson("/api/v1/products/{$canonicalId}/analyze", [
+            'purchase_price' => 111.00,
+            'selling_price' => 222.00,
+            'shipping_cost' => 12.00,
+            'estimated_fees' => 13.00,
+        ])->assertStatus(201);
+
+        // User B creates no analysis yet -> must receive null and empty metrics_history
+        Sanctum::actingAs($userB);
+        $userBDetails = $this->getJson("/api/v1/products/{$canonicalId}");
+        $userBDetails->assertStatus(200);
+        $this->assertNull($userBDetails->json('data.latest_metric'));
+        $this->assertSame([], $userBDetails->json('data.metrics_history'));
+        $this->assertStringNotContainsString('111.0000', $userBDetails->getContent());
+        $this->assertStringNotContainsString('222.0000', $userBDetails->getContent());
+
+        // Guest also gets null and empty metrics_history
+        $this->app['auth']->forgetGuards();
+        $guestDetails = $this->getJson("/api/v1/products/{$canonicalId}");
+        $guestDetails->assertStatus(200);
+        $this->assertNull($guestDetails->json('data.latest_metric'));
+        $this->assertSame([], $guestDetails->json('data.metrics_history'));
+        $this->assertStringNotContainsString('111.0000', $guestDetails->getContent());
+    }
+
+    public function test_product_metric_policy_enforces_ownership_and_admin_permissions(): void
+    {
+        $userA = User::factory()->create();
+        $userB = User::factory()->create();
+        $admin = User::factory()->admin()->create();
+
+        $sharedMetric = ProductMetric::factory()->create(['user_id' => null]);
+        $userAMetric = ProductMetric::factory()->create(['user_id' => $userA->id]);
+
+        $this->assertTrue(Gate::forUser($userA)->allows('view', $userAMetric));
+        $this->assertFalse(Gate::forUser($userB)->allows('view', $userAMetric));
+        $this->assertFalse(Gate::forUser($userB)->allows('view', $sharedMetric));
+        $this->assertFalse(Gate::forUser($userA)->allows('viewAny', ProductMetric::class));
+        $this->assertFalse(Gate::forUser($userA)->allows('update', $userAMetric));
+        $this->assertFalse(Gate::forUser($userA)->allows('delete', $userAMetric));
+
+        $this->assertTrue(Gate::forUser($admin)->allows('viewAny', ProductMetric::class));
+        $this->assertTrue(Gate::forUser($admin)->allows('view', $userAMetric));
+        $this->assertTrue(Gate::forUser($admin)->allows('view', $sharedMetric));
+        $this->assertTrue(Gate::forUser($admin)->allows('delete', $userAMetric));
+    }
+
+    public function test_product_analyze_without_selling_price_never_fabricates_markup_or_profit_in_api_or_db(): void
+    {
+        $user = User::factory()->create();
+        $product = Product::factory()->create([
+            'price' => 100.0000,
+            'original_price' => 130.0000,
+            'rating' => 4.6,
+            'reviews_count' => 150,
+            'is_available' => true,
+        ]);
+        $canonicalId = $product->canonical_product_id;
+
+        Sanctum::actingAs($user);
+
+        // Case C + Case A: POST without selling_price ({})
+        $missingRes = $this->postJson("/api/v1/products/{$canonicalId}/analyze", []);
+        $missingRes->assertStatus(201);
+
+        $rawContent = $missingRes->getContent();
+        $this->assertStringNotContainsString('150.0000', $rawContent);
+        $this->assertStringNotContainsString('50.0000', $rawContent);
+        $this->assertStringNotContainsString('33.3333', $rawContent);
+        $this->assertStringNotContainsString('130.0000', $rawContent);
+
+        $missingRes->assertJson([
+            'success' => true,
+            'data' => [
+                'purchase_price' => '100.0000',
+                'selling_price' => null,
+                'estimated_profit' => null,
+                'profit_margin' => null,
+                'return_on_investment' => null,
+                'calculation_notes' => [
+                    'is_profitable' => null,
+                    'status' => 'DATA_UNAVAILABLE',
+                    'missing_critical_data' => ['selling_price'],
+                ],
+            ],
+        ]);
+
+        $missingMetricId = $missingRes->json('data.id');
+        $this->assertDatabaseHas('product_metrics', [
+            'id' => $missingMetricId,
+            'canonical_product_id' => $canonicalId,
+            'purchase_price' => '100.0000',
+            'selling_price' => null,
+            'estimated_profit' => null,
+            'profit_margin' => null,
+            'return_on_investment' => null,
+        ]);
+
+        // Product details GET endpoint also reflects null rather than fabricated metrics
+        $detailsRes = $this->getJson("/api/v1/products/{$canonicalId}");
+        $detailsRes->assertStatus(200);
+        $this->assertNull($detailsRes->json('data.latest_metric.selling_price'));
+        $this->assertNull($detailsRes->json('data.latest_metric.estimated_profit'));
+        $this->assertNull($detailsRes->json('data.latest_metric.profit_margin'));
+        $this->assertNull($detailsRes->json('data.latest_metric.return_on_investment'));
+        $this->assertNull($detailsRes->json('data.latest_metric.calculation_notes.is_profitable'));
+        $this->assertSame('DATA_UNAVAILABLE', $detailsRes->json('data.latest_metric.calculation_notes.status'));
+
+        // Case B: Explicit selling_price continues computing normally
+        $explicitRes = $this->postJson("/api/v1/products/{$canonicalId}/analyze", [
+            'selling_price' => 150.00,
+        ]);
+        $explicitRes->assertStatus(201)
+            ->assertJson([
+                'success' => true,
+                'data' => [
+                    'purchase_price' => '100.0000',
+                    'selling_price' => '150.0000',
+                    'estimated_profit' => '50.0000',
+                    'profit_margin' => '33.3333',
+                    'return_on_investment' => '50.0000',
+                    'calculation_notes' => [
+                        'is_profitable' => true,
+                    ],
+                ],
+            ]);
     }
 }
 

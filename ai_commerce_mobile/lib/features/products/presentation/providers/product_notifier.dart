@@ -10,7 +10,7 @@ final productRepositoryProvider = Provider<ProductRepository>((ref) {
 });
 
 final productsListProvider = FutureProvider.autoDispose
-    .family<List<CanonicalProductModel>, String?>((ref, search) async {
+    .family<PaginatedProductsModel, String?>((ref, search) async {
   final repository = ref.watch(productRepositoryProvider);
   return await repository.getProducts(search: search);
 });
@@ -26,4 +26,3 @@ final productListingsProvider = FutureProvider.autoDispose
   final repository = ref.watch(productRepositoryProvider);
   return await repository.getProductListings(productId);
 });
-

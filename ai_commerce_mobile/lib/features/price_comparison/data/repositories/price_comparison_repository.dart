@@ -18,14 +18,20 @@ class PriceComparisonRepositoryImpl implements PriceComparisonRepository {
   }) async {
     final queryParams = <String, dynamic>{};
     if (targetCurrency != null && targetCurrency.trim().isNotEmpty) {
-      queryParams['target_currency'] = targetCurrency.trim();
+      queryParams['target_currency'] = targetCurrency.trim().toUpperCase();
     }
 
     final response = await apiClient.get(
       ApiEndpoints.priceComparison(productId),
-      queryParameters: queryParams,
+      queryParameters: queryParams.isEmpty ? null : queryParams,
     );
 
-    return PriceComparisonModel.fromJson(response['data'] as Map<String, dynamic>);
+    if (response is! Map || response['data'] is! Map) {
+      throw const FormatException('Invalid price comparison response envelope.');
+    }
+
+    return PriceComparisonModel.fromJson(
+      Map<String, dynamic>.from(response['data'] as Map),
+    );
   }
 }

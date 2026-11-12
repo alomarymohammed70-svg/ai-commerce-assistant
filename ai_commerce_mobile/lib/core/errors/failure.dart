@@ -36,6 +36,14 @@ class AuthFailure extends Failure {
   });
 }
 
+class ForbiddenFailure extends Failure {
+  const ForbiddenFailure({
+    super.message = 'ليس لديك صلاحية للوصول إلى هذا المورد.',
+    super.statusCode = 403,
+    super.errors,
+  });
+}
+
 class ValidationFailure extends Failure {
   final Map<String, List<String>> fieldErrors;
 

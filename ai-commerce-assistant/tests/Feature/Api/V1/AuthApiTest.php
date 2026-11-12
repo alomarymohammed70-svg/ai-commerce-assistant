@@ -51,7 +51,31 @@ class AuthApiTest extends TestCase
 
         $this->assertDatabaseHas('users', [
             'email' => 'john@example.com',
+            'role' => User::ROLE_USER,
         ]);
+    }
+
+    public function test_register_ignores_privilege_escalation_mass_assignment_attempts(): void
+    {
+        $response = $this->postJson('/api/v1/auth/register', [
+            'name' => 'Escalation Attempt',
+            'email' => 'attacker@example.com',
+            'password' => 'password123',
+            'password_confirmation' => 'password123',
+            'role' => User::ROLE_ADMIN,
+            'is_admin' => true,
+        ]);
+
+        $response->assertStatus(201);
+
+        $user = User::where('email', 'attacker@example.com')->firstOrFail();
+        $this->assertSame(User::ROLE_USER, $user->role);
+        $this->assertFalse($user->isAdmin());
+
+        // Even direct fill() cannot elevate role via mass assignment
+        $user->fill(['role' => User::ROLE_ADMIN]);
+        $user->save();
+        $this->assertSame(User::ROLE_USER, $user->fresh()->role);
     }
 
     public function test_register_validation_fails_on_missing_or_invalid_fields(): void

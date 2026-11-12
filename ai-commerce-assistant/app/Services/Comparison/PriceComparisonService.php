@@ -72,10 +72,11 @@ class PriceComparisonService implements PriceComparisonServiceInterface
                 normalizedPrice: $normalizedPrice,
                 targetCurrency: $currency,
                 exchangeRate: $rate,
-                rating: $listing->rating !== null ? (float) $listing->rating : null,
+                rating: $listing->rating !== null ? round((float) $listing->rating, 2) : null,
                 reviewsCount: (int) $listing->reviews_count,
                 isAvailable: (bool) $listing->is_available,
-                observedAt: $listing->observed_at?->toISOString()
+                observedAt: $listing->observed_at?->toISOString(),
+                seller: $listing->extractSellerSummary()
             );
 
             $offers[] = $dto;

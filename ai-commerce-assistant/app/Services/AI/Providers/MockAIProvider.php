@@ -106,11 +106,15 @@ class MockAIProvider implements AIProviderInterface
         $offersCount = (int) ($context['market']['offers_count'] ?? 0);
         
         $fin = $context['financial_analysis'] ?? [];
-        $isProfitable = (bool) ($fin['is_profitable']['value'] ?? false);
-        $profit = (string) ($fin['estimated_profit']['value'] ?? '0.0000');
-        $margin = (string) ($fin['profit_margin_percent']['value'] ?? '0.00%');
+        $isProfitable = ($fin['is_profitable']['value'] ?? null) === true;
+        $rawProfit = $fin['estimated_profit']['value'] ?? null;
+        $profit = $rawProfit !== null ? (string) $rawProfit : 'DATA_UNAVAILABLE';
+        $rawMargin = $fin['profit_margin_percent']['value'] ?? ($fin['profit_margin_percent'] ?? null);
+        $marginNumeric = $this->normalizeNullablePercentage($rawMargin);
+        $margin = $marginNumeric !== null ? $marginNumeric . '%' : 'DATA_UNAVAILABLE';
         $purchasePrice = (float) ($fin['purchase_price']['value'] ?? 0.0);
         $sellingPrice = (float) ($fin['selling_price']['value'] ?? 0.0);
+        $hasPricingData = $purchasePrice > 0.0 && $sellingPrice > 0.0 && $rawProfit !== null;
         $isShippingVerified = (bool) ($fin['shipping_cost']['is_verified'] ?? false);
         
         $heuristics = $context['deterministic_heuristics'] ?? [];
@@ -151,7 +155,9 @@ class MockAIProvider implements AIProviderInterface
         $riskLevel = $riskScore >= 60 ? 'HIGH' : ($riskScore >= 35 ? 'MEDIUM' : 'LOW');
 
         $reasons = [
-            "Deterministic financial analysis calculates net profit of \${$profit} ({$margin} margin).",
+            $hasPricingData
+                ? "Deterministic financial analysis calculates net profit of \${$profit} ({$margin} margin)."
+                : 'Critical pricing data (purchase or selling price) is unavailable; deterministic profit and margin cannot be calculated.',
             "Market research tracks {$offersCount} active listing(s) in category [{$category}].",
             "Competition density is evaluated at level [{$competitionLevel}].",
         ];
@@ -184,8 +190,10 @@ class MockAIProvider implements AIProviderInterface
             ],
             'profitability' => [
                 'profit' => $profit,
-                'margin' => $margin,
-                'assessment' => $isProfitable ? 'Healthy estimated spread above total landed cost.' : 'Unprofitable after accounting for baseline overheads.',
+                'margin' => $marginNumeric,
+                'assessment' => $hasPricingData
+                    ? ($isProfitable ? 'Healthy estimated spread above total landed cost.' : 'Unprofitable after accounting for baseline overheads.')
+                    : 'Insufficient pricing data: selling price is unavailable.',
             ],
             'competition' => [
                 'level' => $competitionLevel,
@@ -234,6 +242,38 @@ class MockAIProvider implements AIProviderInterface
     {
         $this->simulatedContradiction = $contradict;
         return $this;
+    }
+
+    protected function normalizeNullablePercentage(mixed $raw, int $precision = 4): ?float
+    {
+        if ($raw === null || is_bool($raw) || is_array($raw) || is_object($raw)) {
+            return null;
+        }
+
+        if (is_int($raw) || is_float($raw)) {
+            $float = (float) $raw;
+
+            return is_finite($float) ? round($float, $precision) : null;
+        }
+
+        if (is_string($raw)) {
+            $trimmed = trim($raw);
+            if ($trimmed === '') {
+                return null;
+            }
+            if (str_ends_with($trimmed, '%')) {
+                $trimmed = trim(substr($trimmed, 0, -1));
+            }
+            if ($trimmed === '' || ! is_numeric($trimmed)) {
+                return null;
+            }
+
+            $float = (float) $trimmed;
+
+            return is_finite($float) ? round($float, $precision) : null;
+        }
+
+        return null;
     }
 }
 

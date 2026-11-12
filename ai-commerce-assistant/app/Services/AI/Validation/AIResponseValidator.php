@@ -52,7 +52,7 @@ class AIResponseValidator
             $errors[] = 'recommendation.decision must be one of: ' . implode(', ', self::ALLOWED_DECISIONS);
         }
 
-        if (! isset($rec['confidence']) || ! is_numeric($rec['confidence']) || (float) $rec['confidence'] < 0.0 || (float) $rec['confidence'] > 1.0) {
+        if (! isset($rec['confidence']) || ! is_numeric($rec['confidence']) || ! is_finite((float) $rec['confidence']) || (float) $rec['confidence'] < 0.0 || (float) $rec['confidence'] > 1.0) {
             $errors[] = 'recommendation.confidence must be a number between 0.0 and 1.0';
         }
 
@@ -62,7 +62,7 @@ class AIResponseValidator
 
         // 3. Validate Opportunity block
         $opp = $response['opportunity'];
-        if (! isset($opp['score']) || ! is_numeric($opp['score']) || (float) $opp['score'] < 0 || (float) $opp['score'] > 100) {
+        if (! isset($opp['score']) || ! is_numeric($opp['score']) || ! is_finite((float) $opp['score']) || (float) $opp['score'] < 0 || (float) $opp['score'] > 100) {
             $errors[] = 'opportunity.score must be a numeric value between 0 and 100.';
         }
 
@@ -76,7 +76,7 @@ class AIResponseValidator
             $errors[] = 'competition.level must be one of: ' . implode(', ', self::ALLOWED_COMPETITION_LEVELS);
         }
 
-        if (isset($comp['score']) && (! is_numeric($comp['score']) || (float) $comp['score'] < 0 || (float) $comp['score'] > 100)) {
+        if (isset($comp['score']) && (! is_numeric($comp['score']) || ! is_finite((float) $comp['score']) || (float) $comp['score'] < 0 || (float) $comp['score'] > 100)) {
             $errors[] = 'competition.score must be between 0 and 100.';
         }
 
@@ -86,7 +86,7 @@ class AIResponseValidator
             $errors[] = 'risk.level must be one of: ' . implode(', ', self::ALLOWED_RISK_LEVELS);
         }
 
-        if (! isset($risk['score']) || ! is_numeric($risk['score']) || (float) $risk['score'] < 0 || (float) $risk['score'] > 100) {
+        if (! isset($risk['score']) || ! is_numeric($risk['score']) || ! is_finite((float) $risk['score']) || (float) $risk['score'] < 0 || (float) $risk['score'] > 100) {
             $errors[] = 'risk.score must be a numeric value between 0 and 100.';
         }
 
@@ -125,7 +125,7 @@ class AIResponseValidator
     protected function enforceDataTruthSupremacy(array $response, array $context): array
     {
         $reconciled = $response;
-        $isProfitable = (bool) ($context['financial_analysis']['is_profitable']['value'] ?? true);
+        $isProfitable = ($context['financial_analysis']['is_profitable']['value'] ?? null) === true;
         $profit = (float) ($context['financial_analysis']['estimated_profit']['value'] ?? 0.0);
         $purchasePrice = (float) ($context['financial_analysis']['purchase_price']['value'] ?? 0.0);
         $sellingPrice = (float) ($context['financial_analysis']['selling_price']['value'] ?? 0.0);
@@ -165,6 +165,18 @@ class AIResponseValidator
             $decision = 'WATCH';
         }
 
+        $reconciled['recommendation']['confidence'] = round((float) $reconciled['recommendation']['confidence'], 4);
+
+        // Critical Missing Data / INSUFFICIENT_DATA confidence cap
+        // Aligns with MockAIProvider baseline (0.35) when offers or baseline pricing are missing.
+        $hasInsufficientCriticalData = $offersCount === 0
+            || $purchasePrice <= 0.0
+            || $sellingPrice <= 0.0
+            || $decision === 'INSUFFICIENT_DATA';
+        if ($hasInsufficientCriticalData && (float) $reconciled['recommendation']['confidence'] > 0.35) {
+            $reconciled['recommendation']['confidence'] = 0.35;
+        }
+
         // Rule E: Unverified Shipping Handling (Degrade confidence and label estimated profit)
         $isShippingVerified = (bool) ($context['financial_analysis']['shipping_cost']['is_verified'] ?? false);
         if (! $isShippingVerified) {
@@ -175,10 +187,80 @@ class AIResponseValidator
             $reconciled['profitability']['assessment'] = '[ESTIMATED] ' . ($reconciled['profitability']['assessment'] ?? '');
         }
 
-        // Rule F: Strict Mathematical Supremacy - Always enforce Laravel calculated figures
-        $reconciled['profitability']['profit'] = (string) ($context['financial_analysis']['estimated_profit']['value'] ?? '0.0000');
-        $reconciled['profitability']['margin'] = (string) ($context['financial_analysis']['profit_margin_percent']['value'] ?? '0.00%');
+        // Rule F: Strict Mathematical & Deterministic Score Supremacy - Always enforce Laravel calculated figures
+        $rawDeterministicProfit = $context['financial_analysis']['estimated_profit']['value'] ?? null;
+        $reconciled['profitability']['profit'] = $rawDeterministicProfit !== null
+            ? (string) $rawDeterministicProfit
+            : 'DATA_UNAVAILABLE';
+
+        $financialAnalysis = is_array($context['financial_analysis'] ?? null) ? $context['financial_analysis'] : [];
+        if (array_key_exists('profit_margin_percent', $financialAnalysis)) {
+            $rawDeterministicMargin = $financialAnalysis['profit_margin_percent'];
+            $deterministicMarginValue = is_array($rawDeterministicMargin)
+                ? ($rawDeterministicMargin['value'] ?? null)
+                : $rawDeterministicMargin;
+            $reconciled['profitability']['margin'] = $this->normalizeNullablePercentage($deterministicMarginValue);
+        } else {
+            $reconciled['profitability']['margin'] = $this->normalizeNullablePercentage(
+                $reconciled['profitability']['margin'] ?? null
+            );
+        }
+
+        $deterministicOpp = $context['deterministic_heuristics']['opportunity_score']['value'] ?? null;
+        if ($deterministicOpp !== null && is_numeric($deterministicOpp) && is_finite((float) $deterministicOpp)) {
+            $canonicalOpportunityScore = round((float) $deterministicOpp, 2);
+            $reconciled['opportunity']['score'] = $canonicalOpportunityScore;
+            $reconciled['opportunity']['level'] = $canonicalOpportunityScore >= 70.0
+                ? 'HIGH'
+                : ($canonicalOpportunityScore >= 45.0 ? 'MEDIUM' : 'LOW');
+        } else {
+            $reconciled['opportunity']['score'] = round((float) $reconciled['opportunity']['score'], 2);
+        }
+
+        $deterministicRisk = $context['deterministic_heuristics']['risk_score']['value'] ?? null;
+        if ($deterministicRisk !== null && is_numeric($deterministicRisk) && is_finite((float) $deterministicRisk)) {
+            $canonicalRiskScore = round((float) $deterministicRisk, 2);
+            $reconciled['risk']['score'] = $canonicalRiskScore;
+            $aiRiskLevel = strtoupper((string) ($reconciled['risk']['level'] ?? ''));
+            $reconciled['risk']['level'] = $canonicalRiskScore >= 60.0
+                ? ($aiRiskLevel === 'CRITICAL' ? 'CRITICAL' : 'HIGH')
+                : ($canonicalRiskScore >= 35.0 ? 'MEDIUM' : 'LOW');
+        } else {
+            $reconciled['risk']['score'] = round((float) $reconciled['risk']['score'], 2);
+        }
 
         return $reconciled;
+    }
+
+    protected function normalizeNullablePercentage(mixed $raw, int $precision = 4): ?float
+    {
+        if ($raw === null || is_bool($raw) || is_array($raw) || is_object($raw)) {
+            return null;
+        }
+
+        if (is_int($raw) || is_float($raw)) {
+            $float = (float) $raw;
+
+            return is_finite($float) ? round($float, $precision) : null;
+        }
+
+        if (is_string($raw)) {
+            $trimmed = trim($raw);
+            if ($trimmed === '') {
+                return null;
+            }
+            if (str_ends_with($trimmed, '%')) {
+                $trimmed = trim(substr($trimmed, 0, -1));
+            }
+            if ($trimmed === '' || ! is_numeric($trimmed)) {
+                return null;
+            }
+
+            $float = (float) $trimmed;
+
+            return is_finite($float) ? round($float, $precision) : null;
+        }
+
+        return null;
     }
 }

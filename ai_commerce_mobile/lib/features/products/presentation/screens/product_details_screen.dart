@@ -39,7 +39,7 @@ class ProductDetailsScreen extends ConsumerWidget {
                 ),
                 const SizedBox(height: 16),
                 ElevatedButton(
-                  onPressed: () => ref.refresh(productDetailsProvider(productId)),
+                  onPressed: () => ref.invalidate(productDetailsProvider(productId)),
                   child: const Text(AppStrings.retry),
                 ),
               ],
@@ -129,8 +129,16 @@ class ProductDetailsScreen extends ConsumerWidget {
                             style: TextStyle(fontSize: 12, color: AppColors.textSecondaryLight),
                           ),
                           Text(
-                            CurrencyFormatter.format(product.lowestPrice, currency: product.baseCurrency),
-                            style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: AppColors.decisionBuy),
+                            product.lowestPrice != null
+                                ? CurrencyFormatter.format(product.lowestPrice, currency: product.priceSummary.currency)
+                                : AppStrings.dataUnavailable,
+                            style: TextStyle(
+                              fontSize: 18,
+                              fontWeight: FontWeight.bold,
+                              color: product.lowestPrice != null
+                                  ? AppColors.decisionBuy
+                                  : AppColors.textSecondaryLight,
+                            ),
                           ),
                         ],
                       ),
@@ -142,13 +150,31 @@ class ProductDetailsScreen extends ConsumerWidget {
                             style: TextStyle(fontSize: 12, color: AppColors.textSecondaryLight),
                           ),
                           Text(
-                            CurrencyFormatter.format(product.highestPrice, currency: product.baseCurrency),
-                            style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                            product.highestPrice != null
+                                ? CurrencyFormatter.format(product.highestPrice, currency: product.priceSummary.currency)
+                                : AppStrings.dataUnavailable,
+                            style: TextStyle(
+                              fontSize: 18,
+                              fontWeight: FontWeight.bold,
+                              color: product.highestPrice != null
+                                  ? null
+                                  : AppColors.textSecondaryLight,
+                            ),
                           ),
                         ],
                       ),
                     ],
                   ),
+                  if (product.averagePrice != null) ...[
+                    const SizedBox(height: 8),
+                    Align(
+                      alignment: Alignment.centerRight,
+                      child: Text(
+                        'متوسط السعر: ${CurrencyFormatter.format(product.averagePrice, currency: product.priceSummary.currency)}',
+                        style: const TextStyle(fontSize: 12, color: AppColors.textSecondaryLight),
+                      ),
+                    ),
+                  ],
                   if (product.latestOpportunityScore != null) ...[
                     const Divider(height: 24),
                     Row(
@@ -238,7 +264,7 @@ class ProductDetailsScreen extends ConsumerWidget {
                 style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
               ),
               Text(
-                '${product.listings.length} ${AppStrings.resultsCount}',
+                '${product.activeListingsCount} نشط / ${product.totalListingsCount} إجمالي',
                 style: const TextStyle(fontSize: 12, color: AppColors.textSecondaryLight),
               ),
             ],
@@ -266,6 +292,11 @@ class ProductDetailsScreen extends ConsumerWidget {
   }
 
   Widget _buildOfferCard(ProductListingModel offer) {
+    final sourceLabel = offer.sourceName.isNotEmpty
+        ? offer.sourceName
+        : (offer.sourceCode.isNotEmpty ? offer.sourceCode.toUpperCase() : AppStrings.dataUnavailable);
+    final sellerLabel = offer.seller?.displayName ?? AppStrings.dataUnavailable;
+
     return Card(
       margin: const EdgeInsets.only(bottom: 10),
       child: Padding(
@@ -282,7 +313,7 @@ class ProductDetailsScreen extends ConsumerWidget {
                     borderRadius: BorderRadius.circular(4),
                   ),
                   child: Text(
-                    offer.sourceName,
+                    sourceLabel,
                     style: const TextStyle(
                       color: Colors.blue,
                       fontSize: 11,
@@ -292,11 +323,15 @@ class ProductDetailsScreen extends ConsumerWidget {
                 ),
                 const Spacer(),
                 Text(
-                  CurrencyFormatter.format(offer.price, currency: offer.currency),
-                  style: const TextStyle(
+                  offer.price != null
+                      ? CurrencyFormatter.format(offer.price, currency: offer.currency)
+                      : 'غير متاح',
+                  style: TextStyle(
                     fontSize: 16,
                     fontWeight: FontWeight.bold,
-                    color: AppColors.primary,
+                    color: offer.price != null
+                        ? AppColors.primary
+                        : AppColors.textSecondaryLight,
                   ),
                 ),
               ],
@@ -310,7 +345,7 @@ class ProductDetailsScreen extends ConsumerWidget {
             ),
             const SizedBox(height: 10),
 
-            // Decoupled Seller Signals
+            // Safe Seller Signals (no raw_payload, no fake placeholder)
             Container(
               padding: const EdgeInsets.all(8),
               decoration: BoxDecoration(
@@ -321,21 +356,25 @@ class ProductDetailsScreen extends ConsumerWidget {
                 children: [
                   const Icon(Icons.storefront_outlined, size: 16, color: AppColors.textSecondaryLight),
                   const SizedBox(width: 6),
-                  Text(
-                    offer.supplierUsername ?? 'بائع معتمد',
-                    style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500),
+                  Expanded(
+                    child: Text(
+                      sellerLabel,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500),
+                    ),
                   ),
-                  const Spacer(),
-                  if (offer.sellerFeedbackPercentage != null) ...[
+                  const SizedBox(width: 8),
+                  if (offer.seller?.feedbackPercentage != null) ...[
                     const Icon(Icons.star_rounded, size: 14, color: Colors.amber),
                     const SizedBox(width: 2),
                     Text(
-                      '${offer.sellerFeedbackPercentage}% تقييم البائع',
+                      '${offer.seller!.feedbackPercentage}% تقييم البائع',
                       style: const TextStyle(fontSize: 11, color: AppColors.textSecondaryLight),
                     ),
                   ] else
                     const Text(
-                      'تقييم البائع غير متوفر',
+                      AppStrings.dataUnavailable,
                       style: TextStyle(fontSize: 11, color: AppColors.textSecondaryLight),
                     ),
                 ],

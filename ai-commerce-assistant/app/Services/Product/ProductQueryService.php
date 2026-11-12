@@ -5,6 +5,7 @@ namespace App\Services\Product;
 use App\Models\Product;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\Builder;
+use InvalidArgumentException;
 
 class ProductQueryService
 {
@@ -17,6 +18,7 @@ class ProductQueryService
         'rating',
         'reviews_count',
         'title',
+        'brand',
     ];
 
     /**
@@ -52,6 +54,11 @@ class ProductQueryService
                     ->orWhere('brand', 'LIKE', '%' . $term . '%')
                     ->orWhere('external_id', 'LIKE', '%' . $term . '%');
             });
+        }
+
+        // Filter by Brand
+        if (! empty($filters['brand'])) {
+            $query->where('brand', 'LIKE', '%' . trim((string) $filters['brand']) . '%');
         }
 
         // Filter by Source (code or ID)
@@ -115,14 +122,14 @@ class ProductQueryService
         $direction = strtolower(trim((string) ($filters['sort_direction'] ?? 'desc')));
 
         if (! in_array($sortBy, self::ALLOWED_SORT_COLUMNS, true)) {
-            $sortBy = 'created_at';
+            throw new InvalidArgumentException("Unsupported sort_by field [{$sortBy}] for product listings.");
         }
 
         if (! in_array($direction, ['asc', 'desc'], true)) {
-            $direction = 'desc';
+            throw new InvalidArgumentException("Unsupported sort_direction [{$direction}].");
         }
 
-        $query->orderBy($sortBy, $direction);
+        $query->orderBy($sortBy, $direction)->orderBy('id', $direction);
     }
 }
 

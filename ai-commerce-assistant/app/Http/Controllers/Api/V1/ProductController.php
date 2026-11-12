@@ -5,7 +5,9 @@ namespace App\Http\Controllers\Api\V1;
 use App\Contracts\Comparison\PriceComparisonServiceInterface;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Api\V1\Product\AnalyzeProductRequest;
-use App\Http\Requests\Api\V1\Product\ProductFilterRequest;
+use App\Http\Requests\Api\V1\Product\CanonicalProductFilterRequest;
+use App\Http\Requests\Api\V1\Product\PriceComparisonRequest;
+use InvalidArgumentException;
 use App\Http\Resources\Api\V1\CanonicalProductDetailResource;
 use App\Http\Resources\Api\V1\CanonicalProductResource;
 use App\Http\Resources\Api\V1\PriceComparisonResource;
@@ -13,6 +15,7 @@ use App\Http\Resources\Api\V1\ProductListingResource;
 use App\Http\Resources\Api\V1\ProductMetricResource;
 use App\Models\CanonicalProduct;
 use App\Models\ProductListing;
+use App\Models\ProductMetric;
 use App\Services\Analysis\ProductAnalysisEngine;
 use App\Services\Comparison\PriceComparisonService;
 use App\Services\Product\CanonicalProductQueryService;
@@ -33,7 +36,7 @@ class ProductController extends Controller
     /**
      * Paginated list of canonical products with eager loaded listings and metrics.
      */
-    public function index(ProductFilterRequest $request): JsonResponse
+    public function index(CanonicalProductFilterRequest $request): JsonResponse
     {
         $paginator = $this->queryService->paginate($request->validated());
 
@@ -50,14 +53,15 @@ class ProductController extends Controller
     public function show(Request $request, int $id): JsonResponse
     {
         $product = $this->resolveCanonicalProduct($id);
+        $viewerId = ProductMetric::resolveApiViewerId($request);
 
         $product->load([
             'category',
             'latestMetric',
-            'metrics' => fn ($q) => $q->latest('calculated_at')->limit(10),
+            'metrics' => fn ($q) => $q->visibleTo($viewerId)->latest('calculated_at')->latest('id')->limit(10),
             'listings.source',
             'listings.latestMetric',
-            'listings.metrics' => fn ($q) => $q->latest('calculated_at')->limit(10),
+            'listings.metrics' => fn ($q) => $q->visibleTo($viewerId)->latest('calculated_at')->latest('id')->limit(10),
         ]);
 
         return $this->successResponse(
@@ -86,12 +90,17 @@ class ProductController extends Controller
     /**
      * Compare multi-market prices and calculate market spread & potential margin.
      */
-    public function priceComparison(Request $request, int $id): JsonResponse
+    public function priceComparison(PriceComparisonRequest $request, int $id): JsonResponse
     {
         $product = $this->resolveCanonicalProduct($id);
-        $targetCurrency = $request->query('currency');
+        $validated = $request->validated();
+        $targetCurrency = $validated['target_currency'] ?? null;
 
-        $result = $this->priceComparisonService->compare($product, $targetCurrency);
+        try {
+            $result = $this->priceComparisonService->compare($product, $targetCurrency);
+        } catch (InvalidArgumentException $e) {
+            return $this->errorResponse($e->getMessage(), null, 422);
+        }
 
         return $this->successResponse(
             new PriceComparisonResource($result),
@@ -104,9 +113,18 @@ class ProductController extends Controller
      */
     public function analyze(AnalyzeProductRequest $request, int $id): JsonResponse
     {
+        $user = $request->user();
+        if (! $user) {
+            return $this->errorResponse('Unauthenticated', null, 401);
+        }
+
         $product = $this->resolveCanonicalProduct($id);
 
-        $metric = $this->analysisEngine->calculateAndPersist($product, $request->validated());
+        $metric = $this->analysisEngine->calculateAndPersist(
+            $product,
+            $request->validated(),
+            (int) $user->id
+        );
 
         return $this->successResponse(
             new ProductMetricResource($metric),

@@ -148,12 +148,15 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
                 ),
               ),
 
-              // KPI Stats Grid (derived from loaded products or counts)
+              // KPI Stats Grid (derived from loaded products or server meta counts)
               SliverToBoxAdapter(
                 child: Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 16),
                   child: productsAsync.maybeWhen(
-                    data: (products) => _buildStatsRow(products),
+                    data: (paginated) => _buildStatsRow(
+                      paginated.items,
+                      totalCount: paginated.meta.total,
+                    ),
                     orElse: () => const SizedBox.shrink(),
                   ),
                 ),
@@ -171,8 +174,8 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
                         style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
                       ),
                       productsAsync.maybeWhen(
-                        data: (products) => Text(
-                          '${products.length} منتج',
+                        data: (paginated) => Text(
+                          '${paginated.meta.total} منتج',
                           style: TextStyle(
                             fontSize: 13,
                             color: Theme.of(context).colorScheme.onSurfaceVariant,
@@ -222,7 +225,8 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
                     ),
                   ),
                 ),
-                data: (products) {
+                data: (paginated) {
+                  final products = paginated.items;
                   if (products.isEmpty) {
                     return SliverFillRemaining(
                       hasScrollBody: false,
@@ -387,10 +391,12 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
     );
   }
 
-  Widget _buildStatsRow(List<CanonicalProductModel> products) {
-    int totalCount = products.length;
-    int highOpportunityCount = products.where((p) => (p.latestOpportunityScore ?? 0) >= 70).length;
-    int moderateCount = products.where((p) => (p.latestOpportunityScore ?? 0) >= 40 && (p.latestOpportunityScore ?? 0) < 70).length;
+  Widget _buildStatsRow(List<CanonicalProductModel> products, {required int totalCount}) {
+    int highOpportunityCount = products.where((p) => (p.latestOpportunityScore ?? -1) >= 70).length;
+    int moderateCount = products.where((p) {
+      final score = p.latestOpportunityScore;
+      return score != null && score >= 40 && score < 70;
+    }).length;
 
     return Row(
       children: [
@@ -576,7 +582,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
                       ),
                       const SizedBox(height: 2),
                       Text(
-                        '${CurrencyFormatter.format(product.lowestPrice, currency: product.baseCurrency)} - ${CurrencyFormatter.format(product.highestPrice, currency: product.baseCurrency)}',
+                        _formatPriceRange(product),
                         style: const TextStyle(
                           fontSize: 13,
                           fontWeight: FontWeight.w600,
@@ -606,6 +612,23 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
         ),
       ),
     );
+  }
+
+  String _formatPriceRange(CanonicalProductModel product) {
+    final low = product.lowestPrice;
+    final high = product.highestPrice;
+    final currency = product.priceSummary.currency;
+
+    if (low == null && high == null) {
+      return AppStrings.dataUnavailable;
+    }
+    if (low != null && high != null) {
+      if ((low - high).abs() < 0.0001) {
+        return CurrencyFormatter.format(low, currency: currency);
+      }
+      return '${CurrencyFormatter.format(low, currency: currency)} - ${CurrencyFormatter.format(high, currency: currency)}';
+    }
+    return CurrencyFormatter.format(low ?? high, currency: currency);
   }
 
   Widget _buildEmptyState() {

@@ -4,6 +4,9 @@ namespace App\DTOs\Comparison;
 
 class ListingOfferComparisonDto
 {
+    /**
+     * @param array{username: ?string, store_name: ?string, feedback_percentage: ?float, feedback_score: ?int}|null $seller
+     */
     public function __construct(
         public readonly int $listingId,
         public readonly int $sourceId,
@@ -11,7 +14,7 @@ class ListingOfferComparisonDto
         public readonly string $sourceName,
         public readonly string $externalId,
         public readonly string $title,
-        public readonly string $url,
+        public readonly ?string $url,
         public readonly ?string $imageUrl,
         public readonly string $originalPrice,
         public readonly string $originalCurrency,
@@ -21,7 +24,8 @@ class ListingOfferComparisonDto
         public readonly ?float $rating,
         public readonly int $reviewsCount,
         public readonly bool $isAvailable,
-        public readonly ?string $observedAt
+        public readonly ?string $observedAt,
+        public readonly ?array $seller = null
     ) {}
 
     public function toArray(): array
@@ -33,6 +37,7 @@ class ListingOfferComparisonDto
                 'code' => $this->sourceCode,
                 'name' => $this->sourceName,
             ],
+            'seller' => $this->seller,
             'external_id' => $this->externalId,
             'title' => $this->title,
             'url' => $this->url,
@@ -49,4 +54,3 @@ class ListingOfferComparisonDto
         ];
     }
 }
-

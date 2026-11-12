@@ -4,12 +4,14 @@ import '../models/canonical_product_model.dart';
 import '../models/product_listing_model.dart';
 
 abstract class ProductRepository {
-  Future<List<CanonicalProductModel>> getProducts({
+  Future<PaginatedProductsModel> getProducts({
     int page = 1,
     int perPage = 15,
     String? search,
     String? brand,
     int? categoryId,
+    String? sortBy,
+    String? sortDirection,
   });
 
   Future<CanonicalProductModel> getProductDetails(int id);
@@ -22,12 +24,14 @@ class ProductRepositoryImpl implements ProductRepository {
   ProductRepositoryImpl({required this.apiClient});
 
   @override
-  Future<List<CanonicalProductModel>> getProducts({
+  Future<PaginatedProductsModel> getProducts({
     int page = 1,
     int perPage = 15,
     String? search,
     String? brand,
     int? categoryId,
+    String? sortBy,
+    String? sortDirection,
   }) async {
     final queryParams = <String, dynamic>{
       'page': page,
@@ -40,7 +44,13 @@ class ProductRepositoryImpl implements ProductRepository {
       queryParams['brand'] = brand.trim();
     }
     if (categoryId != null) {
-      queryParams['category_id'] = categoryId;
+      queryParams['category'] = categoryId.toString();
+    }
+    if (sortBy != null && sortBy.trim().isNotEmpty) {
+      queryParams['sort_by'] = sortBy.trim();
+    }
+    if (sortDirection != null && sortDirection.trim().isNotEmpty) {
+      queryParams['sort_direction'] = sortDirection.trim();
     }
 
     final response = await apiClient.get(
@@ -48,26 +58,52 @@ class ProductRepositoryImpl implements ProductRepository {
       queryParameters: queryParams,
     );
 
-    final dataList = response['data'] as List? ?? [];
-    return dataList
-        .whereType<Map<String, dynamic>>()
-        .map((json) => CanonicalProductModel.fromJson(json))
-        .toList();
+    if (response is! Map || response['data'] is! List || response['meta'] is! Map) {
+      throw const FormatException('Invalid product catalog paginated response envelope.');
+    }
+
+    final rawList = response['data'] as List;
+    final items = rawList.map((entry) {
+      if (entry is! Map) {
+        throw const FormatException('Invalid canonical product entry in data list.');
+      }
+      return CanonicalProductModel.fromJson(Map<String, dynamic>.from(entry));
+    }).toList();
+
+    final meta = PaginationMetaModel.fromJson(
+      Map<String, dynamic>.from(response['meta'] as Map),
+    );
+
+    return PaginatedProductsModel(items: items, meta: meta);
   }
 
   @override
   Future<CanonicalProductModel> getProductDetails(int id) async {
     final response = await apiClient.get(ApiEndpoints.productDetails(id));
-    return CanonicalProductModel.fromJson(response['data'] as Map<String, dynamic>);
+
+    if (response is! Map || response['data'] is! Map) {
+      throw const FormatException('Invalid product details response envelope.');
+    }
+
+    return CanonicalProductModel.fromJson(
+      Map<String, dynamic>.from(response['data'] as Map),
+    );
   }
 
   @override
   Future<List<ProductListingModel>> getProductListings(int id) async {
     final response = await apiClient.get(ApiEndpoints.productListings(id));
-    final dataList = response['data'] as List? ?? [];
-    return dataList
-        .whereType<Map<String, dynamic>>()
-        .map((json) => ProductListingModel.fromJson(json))
-        .toList();
+
+    if (response is! Map || response['data'] is! List) {
+      throw const FormatException('Invalid product listings response envelope.');
+    }
+
+    final rawList = response['data'] as List;
+    return rawList.map((entry) {
+      if (entry is! Map) {
+        throw const FormatException('Invalid product listing entry in data list.');
+      }
+      return ProductListingModel.fromJson(Map<String, dynamic>.from(entry));
+    }).toList();
   }
 }

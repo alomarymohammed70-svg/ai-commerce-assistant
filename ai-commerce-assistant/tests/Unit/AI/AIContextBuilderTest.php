@@ -94,13 +94,17 @@ class AIContextBuilderTest extends TestCase
         // 3. Verify Deterministic Financial Totals (BCMath)
         // Total cost = 120 + 15 + 22 + 5 = 162.0000
         // Profit = 220 - 162 = 58.0000
-        // Margin = (58 / 220) * 100 = 26.3636%
+        // Margin = (58 / 220) * 100 = 26.3636 (numeric, no '%')
+        // ROI = (58 / 162) * 100 = 35.8024 (numeric, no '%')
         $fin = $context['financial_analysis'];
         $this->assertEquals('162.0000', $fin['total_cost']['value']);
         $this->assertEquals(DataTruthLevel::CALCULATED, $fin['total_cost']['truth']);
         $this->assertEquals('58.0000', $fin['estimated_profit']['value']);
         $this->assertEquals(DataTruthLevel::CALCULATED, $fin['estimated_profit']['truth']);
-        $this->assertEquals('26.3636%', $fin['profit_margin_percent']['value']);
+        $this->assertIsFloat($fin['profit_margin_percent']['value']);
+        $this->assertSame(26.3636, $fin['profit_margin_percent']['value']);
+        $this->assertIsFloat($fin['return_on_investment_percent']['value']);
+        $this->assertSame(35.8024, $fin['return_on_investment_percent']['value']);
         $this->assertTrue($fin['is_profitable']['value']);
 
         // 4. Verify Heuristics
@@ -124,6 +128,166 @@ class AIContextBuilderTest extends TestCase
         $this->assertEquals(0, $context['market']['offers_count']);
         $this->assertFalse($context['data_truth_meta']['has_active_listings']);
         $this->assertContains('active_marketplace_offers', $context['data_truth_meta']['missing_critical_data']);
+    }
+
+    public function test_missing_selling_price_on_canonical_product_does_not_fabricate_markup_fallback(): void
+    {
+        $category = Category::factory()->create(['name' => 'Smart Watches']);
+        $source = ProductSource::factory()->create(['code' => 'ebay', 'name' => 'eBay Marketplace']);
+
+        $canonical = CanonicalProduct::create([
+            'category_id' => $category->id,
+            'name' => 'Garmin Fenix 7 Solar Smartwatch',
+            'slug' => 'garmin-fenix-7-solar-no-selling',
+            'brand' => 'Garmin',
+            'base_currency' => 'USD',
+        ]);
+
+        ProductListing::create([
+            'canonical_product_id' => $canonical->id,
+            'source_id' => $source->id,
+            'category_id' => $category->id,
+            'external_id' => 'v1|GARMIN-7-NOSELL|0',
+            'title' => 'Garmin Fenix 7 Solar Multisport GPS Watch',
+            'price' => 599.99,
+            'currency' => 'USD',
+            'is_available' => true,
+            'url' => 'https://www.ebay.com/itm/garmin7-nosell',
+        ]);
+
+        $context = $this->builder->build($canonical, []);
+        $fin = $context['financial_analysis'];
+        $rawJson = json_encode($context, JSON_THROW_ON_ERROR);
+
+        // Purchase price remains observed from active listing; synthetic 1.45x (869.9855) must never appear
+        $this->assertSame('599.9900', $fin['purchase_price']['value']);
+        $this->assertSame(DataTruthLevel::OBSERVED, $fin['purchase_price']['truth']);
+        $this->assertStringNotContainsString('869.9855', $rawJson);
+        $this->assertStringNotContainsString('31.0344', $rawJson);
+
+        // Missing selling price and derived profitability metrics must remain null and never tagged CALCULATED
+        $this->assertNull($fin['selling_price']['value']);
+        $this->assertNull($fin['selling_price']['truth']);
+        $this->assertNotSame(DataTruthLevel::CALCULATED, $fin['selling_price']['truth']);
+        $this->assertSame('DATA_UNAVAILABLE', $fin['selling_price']['status']);
+
+        $this->assertNull($fin['estimated_profit']['value']);
+        $this->assertNull($fin['estimated_profit']['truth']);
+        $this->assertSame('INSUFFICIENT_DATA', $fin['estimated_profit']['status']);
+
+        $this->assertNull($fin['profit_margin_percent']['value']);
+        $this->assertNull($fin['profit_margin_percent']['truth']);
+
+        $this->assertNull($fin['return_on_investment_percent']['value']);
+        $this->assertNull($fin['return_on_investment_percent']['truth']);
+
+        $this->assertNull($fin['is_profitable']['value']);
+        $this->assertNotTrue($fin['is_profitable']['value']);
+        $this->assertNull($fin['is_profitable']['truth']);
+
+        $this->assertContains('verified_selling_price', $context['data_truth_meta']['missing_critical_data']);
+    }
+
+    public function test_missing_selling_price_on_listing_omits_synthetic_markup_while_explicit_selling_price_preserves_calculated_metrics(): void
+    {
+        $category = Category::factory()->create(['name' => 'Smart Watches']);
+        $source = ProductSource::factory()->create(['code' => 'ebay', 'name' => 'eBay Marketplace']);
+
+        $canonical = CanonicalProduct::create([
+            'category_id' => $category->id,
+            'name' => 'Garmin Fenix 7 Pro',
+            'slug' => 'garmin-fenix-7-pro',
+            'brand' => 'Garmin',
+            'base_currency' => 'USD',
+        ]);
+
+        $listing = ProductListing::create([
+            'canonical_product_id' => $canonical->id,
+            'source_id' => $source->id,
+            'category_id' => $category->id,
+            'external_id' => 'v1|GARMIN-7-PRO|0',
+            'title' => 'Garmin Fenix 7 Pro',
+            'price' => 599.99,
+            'currency' => 'USD',
+            'is_available' => true,
+            'url' => 'https://www.ebay.com/itm/garmin7-pro',
+        ]);
+
+        // 1. Purchase price supplied, selling_price omitted -> must NOT compute 350 * 1.45 = 507.5000
+        $missingSellingContext = $this->builder->build($listing, [
+            'purchase_price' => 350.00,
+        ]);
+        $missingFin = $missingSellingContext['financial_analysis'];
+
+        $this->assertSame('350.0000', $missingFin['purchase_price']['value']);
+        $this->assertSame(DataTruthLevel::ESTIMATED, $missingFin['purchase_price']['truth']);
+        $this->assertStringNotContainsString('507.5000', json_encode($missingSellingContext, JSON_THROW_ON_ERROR));
+        $this->assertNull($missingFin['selling_price']['value']);
+        $this->assertNull($missingFin['selling_price']['truth']);
+        $this->assertSame('DATA_UNAVAILABLE', $missingFin['selling_price']['status']);
+        $this->assertNull($missingFin['estimated_profit']['value']);
+        $this->assertNull($missingFin['profit_margin_percent']['value']);
+        $this->assertNull($missingFin['return_on_investment_percent']['value']);
+        $this->assertNull($missingFin['is_profitable']['value']);
+        $this->assertContains('verified_selling_price', $missingSellingContext['data_truth_meta']['missing_critical_data']);
+
+        // 2. Explicit selling_price supplied -> preserves normal CALCULATED metrics
+        $explicitSellingContext = $this->builder->build($listing, [
+            'purchase_price' => 350.00,
+            'selling_price' => 599.99,
+        ]);
+        $explicitFin = $explicitSellingContext['financial_analysis'];
+
+        $this->assertSame('599.9900', $explicitFin['selling_price']['value']);
+        $this->assertSame(DataTruthLevel::CALCULATED, $explicitFin['selling_price']['truth']);
+        $this->assertSame('249.9900', $explicitFin['estimated_profit']['value']);
+        $this->assertSame(DataTruthLevel::CALCULATED, $explicitFin['estimated_profit']['truth']);
+        $this->assertTrue($explicitFin['is_profitable']['value']);
+        $this->assertIsFloat($explicitFin['profit_margin_percent']['value']);
+        $this->assertIsFloat($explicitFin['return_on_investment_percent']['value']);
+        $this->assertNotContains('verified_selling_price', $explicitSellingContext['data_truth_meta']['missing_critical_data']);
+    }
+
+    public function test_user_or_default_shipping_input_without_verified_source_remains_estimated_and_unverified(): void
+    {
+        $category = Category::factory()->create(['name' => 'Power Banks']);
+        $source = ProductSource::factory()->create(['code' => 'amazon', 'name' => 'Amazon Marketplace']);
+
+        $canonical = CanonicalProduct::create([
+            'category_id' => $category->id,
+            'name' => 'Anker 737 Power Bank',
+            'slug' => 'anker-737-e622',
+            'brand' => 'Anker',
+            'base_currency' => 'USD',
+        ]);
+
+        ProductListing::create([
+            'canonical_product_id' => $canonical->id,
+            'source_id' => $source->id,
+            'category_id' => $category->id,
+            'external_id' => 'ANKER-737-01',
+            'title' => 'Anker 737 Power Bank',
+            'price' => 99.50,
+            'currency' => 'USD',
+            'is_available' => true,
+            'url' => 'https://example.com/anker737',
+        ]);
+
+        $context = $this->builder->build($canonical, [
+            'purchase_price' => 99.50,
+            'selling_price' => 149.99,
+            'shipping_cost' => 15.00,
+            'estimated_fees' => 10.00,
+        ]);
+
+        $fin = $context['financial_analysis'];
+        $this->assertSame(DataTruthLevel::ESTIMATED, $fin['purchase_price']['truth']);
+        $this->assertSame(DataTruthLevel::CALCULATED, $fin['selling_price']['truth']);
+        $this->assertSame(DataTruthLevel::ESTIMATED, $fin['shipping_cost']['truth']);
+        $this->assertFalse($fin['shipping_cost']['is_verified']);
+        $this->assertSame(DataTruthLevel::ESTIMATED, $fin['estimated_fees']['truth']);
+        $this->assertSame('ESTIMATED_PENDING_SHIPPING', $fin['estimated_profit']['status']);
+        $this->assertContains('verified_shipping_cost_estimate', $context['data_truth_meta']['missing_critical_data']);
     }
 }
 

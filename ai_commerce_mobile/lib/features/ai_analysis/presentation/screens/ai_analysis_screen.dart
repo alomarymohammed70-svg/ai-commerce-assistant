@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../../../../core/config/env_config.dart';
 import '../../../../core/constants/app_colors.dart';
 import '../../../../core/constants/app_strings.dart';
 import '../../../../core/utils/currency_formatter.dart';
 import '../../../../core/utils/decision_ui_helper.dart';
 import '../../data/models/ai_analysis_model.dart';
+import '../../data/models/financial_metrics_model.dart';
 import '../providers/ai_analysis_notifier.dart';
 
 class AiAnalysisScreen extends ConsumerStatefulWidget {
@@ -33,12 +35,13 @@ class _AiAnalysisScreenState extends ConsumerState<AiAnalysisScreen> {
   late final TextEditingController _shippingCostController;
   late final TextEditingController _feesController;
 
-  String _selectedDriver = 'mock'; // default to mock or openai
+  late String _selectedDriver;
   bool _showCustomInputs = false;
 
   @override
   void initState() {
     super.initState();
+    _selectedDriver = EnvConfig.defaultAiDriver;
     _purchasePriceController = TextEditingController(
       text: widget.defaultPurchasePrice != null && widget.defaultPurchasePrice! > 0
           ? widget.defaultPurchasePrice!.toStringAsFixed(2)
@@ -77,13 +80,17 @@ class _AiAnalysisScreenState extends ConsumerState<AiAnalysisScreen> {
     final shippingCost = double.tryParse(_shippingCostController.text.trim());
     final fees = double.tryParse(_feesController.text.trim());
 
+    final effectiveDriver = EnvConfig.isProduction && _selectedDriver == 'mock'
+        ? 'openai'
+        : _selectedDriver;
+
     ref.read(aiAnalysisNotifierProvider.notifier).analyzeProduct(
           canonicalProductId: widget.canonicalProductId,
           purchasePrice: purchasePrice,
           sellingPrice: sellingPrice,
           shippingCost: shippingCost,
           estimatedFees: fees,
-          driver: _selectedDriver,
+          driver: effectiveDriver,
         );
   }
 
@@ -278,14 +285,16 @@ class _AiAnalysisScreenState extends ConsumerState<AiAnalysisScreen> {
               children: [
                 const Text('مزود الذكاء: ', style: TextStyle(fontSize: 13)),
                 const SizedBox(width: 8),
-                ChoiceChip(
-                  label: const Text('Mock Engine'),
-                  selected: _selectedDriver == 'mock',
-                  onSelected: (val) {
-                    if (val) setState(() => _selectedDriver = 'mock');
-                  },
-                ),
-                const SizedBox(width: 8),
+                if (!EnvConfig.isProduction) ...[
+                  ChoiceChip(
+                    label: const Text('Mock Engine'),
+                    selected: _selectedDriver == 'mock',
+                    onSelected: (val) {
+                      if (val) setState(() => _selectedDriver = 'mock');
+                    },
+                  ),
+                  const SizedBox(width: 8),
+                ],
                 ChoiceChip(
                   label: const Text('OpenAI'),
                   selected: _selectedDriver == 'openai',
@@ -420,7 +429,7 @@ class _AiAnalysisScreenState extends ConsumerState<AiAnalysisScreen> {
                         border: Border.all(color: decisionColor.withAlpha(80)),
                       ),
                       child: Text(
-                        'مستوى الثقة: ${(analysis.confidence * 100).toStringAsFixed(0)}%',
+                        'مستوى الثقة: ${analysis.confidence != null ? _formatConfidencePercent(analysis.confidence!) : 'غير متاح'}',
                         style: TextStyle(
                           fontSize: 12,
                           fontWeight: FontWeight.bold,
@@ -438,11 +447,8 @@ class _AiAnalysisScreenState extends ConsumerState<AiAnalysisScreen> {
                   style: const TextStyle(fontSize: 14, height: 1.5, fontWeight: FontWeight.w500),
                 ),
                 const SizedBox(height: 12),
-                // Shipping Data Truth Alert
-                DecisionUiHelper.buildDataTruthBadge(
-                  metrics.profitStatus,
-                  isShippingVerified: metrics.isShippingVerified,
-                ),
+                // Shipping & Profit Data Truth Alert
+                _buildFinancialTruthBanner(metrics),
               ],
             ),
           ),
@@ -458,7 +464,7 @@ class _AiAnalysisScreenState extends ConsumerState<AiAnalysisScreen> {
                 score: analysis.opportunityScore,
                 level: detail.opportunity.level,
                 icon: Icons.trending_up,
-                color: AppColors.buy,
+                color: analysis.opportunityScore == null ? Colors.grey : AppColors.buy,
               ),
             ),
             const SizedBox(width: 12),
@@ -468,7 +474,9 @@ class _AiAnalysisScreenState extends ConsumerState<AiAnalysisScreen> {
                 score: analysis.riskScore,
                 level: detail.risk.level,
                 icon: Icons.security,
-                color: analysis.riskScore > 50 ? AppColors.avoid : AppColors.watch,
+                color: analysis.riskScore == null
+                    ? Colors.grey
+                    : (analysis.riskScore! > 50 ? AppColors.avoid : AppColors.watch),
               ),
             ),
           ],
@@ -517,9 +525,25 @@ class _AiAnalysisScreenState extends ConsumerState<AiAnalysisScreen> {
     );
   }
 
+  String _formatConfidencePercent(double confidence) {
+    final percent = (confidence * 10000).roundToDouble() / 100;
+    if (percent == percent.truncateToDouble()) {
+      return '${percent.toInt()}%';
+    }
+    return '${double.parse(percent.toStringAsFixed(2))}%';
+  }
+
+  String _formatScoreValue(double score) {
+    final rounded = (score * 100).roundToDouble() / 100;
+    if (rounded == rounded.truncateToDouble()) {
+      return rounded.toInt().toString();
+    }
+    return double.parse(rounded.toStringAsFixed(2)).toString();
+  }
+
   Widget _buildScoreCard({
     required String title,
-    required double score,
+    required double? score,
     required String level,
     required IconData icon,
     required Color color,
@@ -557,15 +581,26 @@ class _AiAnalysisScreenState extends ConsumerState<AiAnalysisScreen> {
               crossAxisAlignment: CrossAxisAlignment.baseline,
               textBaseline: TextBaseline.alphabetic,
               children: [
-                Text(
-                  score.toStringAsFixed(0),
-                  style: TextStyle(
-                    fontSize: 28,
-                    fontWeight: FontWeight.bold,
-                    color: color,
+                if (score != null) ...[
+                  Text(
+                    _formatScoreValue(score),
+                    style: TextStyle(
+                      fontSize: 28,
+                      fontWeight: FontWeight.bold,
+                      color: color,
+                    ),
                   ),
-                ),
-                const Text('/100', style: TextStyle(fontSize: 12, color: Colors.grey)),
+                  const Text('/100', style: TextStyle(fontSize: 12, color: Colors.grey)),
+                ] else ...[
+                  const Text(
+                    'غير متاح',
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.grey,
+                    ),
+                  ),
+                ],
                 const Spacer(),
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
@@ -586,7 +621,7 @@ class _AiAnalysisScreenState extends ConsumerState<AiAnalysisScreen> {
             ),
             const SizedBox(height: 8),
             LinearProgressIndicator(
-              value: (score / 100).clamp(0.0, 1.0),
+              value: score != null ? (score / 100).clamp(0.0, 1.0) : 0.0,
               backgroundColor: color.withAlpha(30),
               valueColor: AlwaysStoppedAnimation<Color>(color),
               borderRadius: BorderRadius.circular(4),
@@ -598,7 +633,80 @@ class _AiAnalysisScreenState extends ConsumerState<AiAnalysisScreen> {
     );
   }
 
-  Widget _buildFinancialSection(dynamic metrics) {
+  String _formatFinancialPercent(double? value) {
+    if (value == null || !value.isFinite) return 'غير متاح';
+    final rounded = double.parse(value.toStringAsFixed(2));
+    if (rounded == 0) return '0%';
+    if (rounded == rounded.truncateToDouble()) {
+      return '${rounded.toInt()}%';
+    }
+    return '${rounded.toStringAsFixed(2)}%';
+  }
+
+  Widget _buildFinancialTruthBanner(FinancialMetricsModel metrics) {
+    if (metrics.profitStatus == 'DATA_UNAVAILABLE' ||
+        metrics.profitStatus == 'INSUFFICIENT_DATA' ||
+        metrics.sellingPrice == null ||
+        metrics.estimatedProfit == null) {
+      final label = metrics.profitStatus == 'DATA_UNAVAILABLE'
+          ? 'بيانات التسعير غير متوفرة — تعذر حساب الربحية'
+          : 'بيانات غير كافية — تعذر تأكيد الربحية';
+
+      return Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+        decoration: BoxDecoration(
+          color: AppColors.decisionInsufficientBg,
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: AppColors.decisionInsufficientBorder),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.info_outline, size: 16, color: AppColors.decisionInsufficient),
+            const SizedBox(width: 6),
+            Flexible(
+              child: Text(
+                label,
+                style: const TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.bold,
+                  color: AppColors.decisionInsufficient,
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return DecisionUiHelper.buildDataTruthBadge(
+      metrics.profitStatus,
+      isShippingVerified: metrics.hasVerifiedShippingSource,
+    );
+  }
+
+  String _resolveRowTruthTag(double? value, String? backendTruth) {
+    if (value == null) return 'غير متاح';
+    if (backendTruth != null && backendTruth.isNotEmpty) {
+      return backendTruth;
+    }
+    return 'غير محدد';
+  }
+
+  Widget _buildFinancialSection(FinancialMetricsModel metrics) {
+    final Color profitHighlightColor = metrics.isProfitable == null
+        ? AppColors.decisionInsufficient
+        : (metrics.isProfitable! ? AppColors.buy : AppColors.avoid);
+    final Color profitHighlightBg = metrics.isProfitable == null
+        ? AppColors.decisionInsufficientBg
+        : (metrics.isProfitable! ? AppColors.buyLight : AppColors.avoidLight);
+    final Color profitHighlightBorder = metrics.isProfitable == null
+        ? AppColors.decisionInsufficientBorder
+        : (metrics.isProfitable! ? AppColors.buyBorder : AppColors.avoidBorder);
+    final String profitabilityLabel = metrics.isProfitable == null
+        ? 'غير متاح'
+        : (metrics.isProfitable! ? 'مربح' : 'غير مربح');
+
     return Card(
       elevation: 0,
       shape: RoundedRectangleBorder(
@@ -639,63 +747,148 @@ class _AiAnalysisScreenState extends ConsumerState<AiAnalysisScreen> {
               style: TextStyle(fontSize: 11, color: Theme.of(context).colorScheme.onSurfaceVariant),
             ),
             const Divider(height: 24),
-            _buildFinancialRow('سعر الشراء المرجعي:', CurrencyFormatter.formatUsd(metrics.purchasePrice), 'OBSERVED'),
-            _buildFinancialRow('سعر البيع المقترح:', CurrencyFormatter.formatUsd(metrics.sellingPrice), 'OBSERVED'),
-            _buildFinancialRow('تكلفة الشحن:', CurrencyFormatter.formatUsd(metrics.shippingCost), metrics.isShippingVerified ? 'OBSERVED' : 'ESTIMATED'),
-            _buildFinancialRow('العمولات المتوقعة:', CurrencyFormatter.formatUsd(metrics.estimatedFees), 'ESTIMATED'),
+            _buildFinancialRow(
+              'سعر الشراء المرجعي:',
+              CurrencyFormatter.formatUsd(metrics.purchasePrice),
+              _resolveRowTruthTag(metrics.purchasePrice, metrics.purchaseTruth),
+            ),
+            _buildFinancialRow(
+              'سعر البيع المقترح:',
+              CurrencyFormatter.formatUsd(metrics.sellingPrice),
+              _resolveRowTruthTag(metrics.sellingPrice, metrics.sellingTruth),
+            ),
+            _buildFinancialRow(
+              'تكلفة الشحن:',
+              CurrencyFormatter.formatUsd(metrics.shippingCost),
+              _resolveRowTruthTag(metrics.shippingCost, metrics.shippingTruth),
+            ),
+            _buildFinancialRow(
+              'العمولات المتوقعة:',
+              CurrencyFormatter.formatUsd(metrics.estimatedFees),
+              _resolveRowTruthTag(metrics.estimatedFees, metrics.feesTruth),
+            ),
+            _buildFinancialRow(
+              'تكاليف إضافية:',
+              CurrencyFormatter.formatUsd(metrics.otherCosts),
+              _resolveRowTruthTag(metrics.otherCosts, metrics.otherCostsTruth),
+            ),
             const Divider(height: 16),
-            _buildFinancialRow('إجمالي التكاليف:', CurrencyFormatter.formatUsd(metrics.totalCost), 'CALCULATED', isBold: true),
+            _buildFinancialRow(
+              'إجمالي التكاليف:',
+              CurrencyFormatter.formatUsd(metrics.totalCost),
+              _resolveRowTruthTag(metrics.totalCost, metrics.totalCostTruth),
+              isBold: true,
+            ),
             const SizedBox(height: 6),
             Container(
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: metrics.isProfitable ? AppColors.buyLight : AppColors.avoidLight,
+                color: profitHighlightBg,
                 borderRadius: BorderRadius.circular(10),
-                border: Border.all(
-                  color: metrics.isProfitable ? AppColors.buyBorder : AppColors.avoidBorder,
-                ),
+                border: Border.all(color: profitHighlightBorder),
               ),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      Text(
-                        'صافي الربح المتوقع',
-                        style: TextStyle(
-                          fontSize: 12,
-                          fontWeight: FontWeight.bold,
-                          color: metrics.isProfitable ? AppColors.buy : AppColors.avoid,
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'صافي الربح المتوقع',
+                              style: TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.bold,
+                                color: profitHighlightColor,
+                              ),
+                            ),
+                            Text(
+                              CurrencyFormatter.formatUsd(metrics.estimatedProfit),
+                              style: TextStyle(
+                                fontSize: 20,
+                                fontWeight: FontWeight.bold,
+                                color: metrics.estimatedProfit == null
+                                    ? Colors.grey
+                                    : profitHighlightColor,
+                              ),
+                            ),
+                          ],
                         ),
                       ),
-                      Text(
-                        CurrencyFormatter.formatUsd(metrics.estimatedProfit),
-                        style: TextStyle(
-                          fontSize: 20,
-                          fontWeight: FontWeight.bold,
-                          color: metrics.isProfitable ? AppColors.buy : AppColors.avoid,
-                        ),
+                      const SizedBox(width: 12),
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.end,
+                        children: [
+                          Text(
+                            'هامش الربح (Margin)',
+                            style: TextStyle(
+                              fontSize: 11,
+                              color: Theme.of(context).colorScheme.onSurfaceVariant,
+                            ),
+                          ),
+                          Text(
+                            _formatFinancialPercent(metrics.profitMarginPercent),
+                            style: TextStyle(
+                              fontSize: 18,
+                              fontWeight: FontWeight.bold,
+                              color: metrics.profitMarginPercent == null
+                                  ? Colors.grey
+                                  : profitHighlightColor,
+                            ),
+                          ),
+                        ],
                       ),
                     ],
                   ),
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.end,
+                  const SizedBox(height: 10),
+                  Divider(height: 1, color: profitHighlightBorder),
+                  const SizedBox(height: 10),
+                  Wrap(
+                    alignment: WrapAlignment.spaceBetween,
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    spacing: 8,
+                    runSpacing: 6,
                     children: [
                       Text(
-                        'هامش الربح (Margin)',
+                        'العائد على الاستثمار (ROI): ${_formatFinancialPercent(metrics.roiPercent)}',
                         style: TextStyle(
-                          fontSize: 11,
-                          color: Theme.of(context).colorScheme.onSurfaceVariant,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          color: metrics.roiPercent == null
+                              ? Colors.grey
+                              : profitHighlightColor,
                         ),
                       ),
-                      Text(
-                        '${metrics.profitMarginPercent}%',
-                        style: TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.bold,
-                          color: metrics.isProfitable ? AppColors.buy : AppColors.avoid,
-                        ),
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            'حالة الربحية: ',
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: Theme.of(context).colorScheme.onSurfaceVariant,
+                            ),
+                          ),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: Colors.white,
+                              borderRadius: BorderRadius.circular(8),
+                              border: Border.all(color: profitHighlightBorder),
+                            ),
+                            child: Text(
+                              profitabilityLabel,
+                              style: TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.bold,
+                                color: profitHighlightColor,
+                              ),
+                            ),
+                          ),
+                        ],
                       ),
                     ],
                   ),
@@ -718,14 +911,17 @@ class _AiAnalysisScreenState extends ConsumerState<AiAnalysisScreen> {
       padding: const EdgeInsets.symmetric(vertical: 4),
       child: Row(
         children: [
-          Text(
-            title,
-            style: TextStyle(
-              fontSize: 13,
-              fontWeight: isBold ? FontWeight.bold : FontWeight.normal,
+          Expanded(
+            child: Text(
+              title,
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: isBold ? FontWeight.bold : FontWeight.normal,
+              ),
+              overflow: TextOverflow.ellipsis,
             ),
           ),
-          const Spacer(),
+          const SizedBox(width: 8),
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
             decoration: BoxDecoration(
@@ -743,6 +939,7 @@ class _AiAnalysisScreenState extends ConsumerState<AiAnalysisScreen> {
             style: TextStyle(
               fontSize: 14,
               fontWeight: isBold ? FontWeight.bold : FontWeight.w600,
+              color: value == 'غير متاح' ? Colors.grey : null,
             ),
           ),
         ],
@@ -865,15 +1062,29 @@ class _AiAnalysisScreenState extends ConsumerState<AiAnalysisScreen> {
     );
   }
 
+  String _formatDurationMs(double durationMs) {
+    final rounded = (durationMs * 100).roundToDouble() / 100;
+    if (rounded == rounded.truncateToDouble()) {
+      return '${rounded.toInt()} ms';
+    }
+    return '${double.parse(rounded.toStringAsFixed(2))} ms';
+  }
+
   Widget _buildAuditFooter(AIAnalysisModel analysis) {
+    final durationLabel = analysis.durationMs == null
+        ? 'غير متاح'
+        : _formatDurationMs(analysis.durationMs!);
+
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
         color: Colors.grey.withAlpha(20),
         borderRadius: BorderRadius.circular(12),
       ),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceAround,
+      child: Wrap(
+        spacing: 12,
+        runSpacing: 6,
+        alignment: WrapAlignment.spaceAround,
         children: [
           Text(
             'المزود: ${analysis.provider}',
@@ -884,7 +1095,7 @@ class _AiAnalysisScreenState extends ConsumerState<AiAnalysisScreen> {
             style: const TextStyle(fontSize: 11, color: Colors.grey),
           ),
           Text(
-            'الوقت: ${analysis.durationMs}ms',
+            'الوقت: $durationLabel',
             style: const TextStyle(fontSize: 11, color: Colors.grey),
           ),
           Text(

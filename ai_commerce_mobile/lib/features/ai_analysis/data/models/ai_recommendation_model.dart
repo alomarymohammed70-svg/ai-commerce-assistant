@@ -1,62 +1,98 @@
+double? _parseNullableScore(dynamic value) {
+  if (value == null) return null;
+  if (value is num) {
+    final parsed = value.toDouble();
+    return parsed.isFinite ? parsed : null;
+  }
+  if (value is String) {
+    final trimmed = value.trim();
+    if (trimmed.isEmpty) return null;
+    final parsed = double.tryParse(trimmed);
+    return (parsed != null && parsed.isFinite) ? parsed : null;
+  }
+  return null;
+}
+
+double? _parseNullablePercentage(dynamic value) {
+  if (value == null) return null;
+  if (value is num) {
+    final parsed = value.toDouble();
+    return parsed.isFinite ? parsed : null;
+  }
+  if (value is String) {
+    var trimmed = value.trim();
+    if (trimmed.isEmpty) return null;
+    if (trimmed.endsWith('%')) {
+      trimmed = trimmed.substring(0, trimmed.length - 1).trim();
+    }
+    if (trimmed.isEmpty) return null;
+    final parsed = double.tryParse(trimmed);
+    return (parsed != null && parsed.isFinite) ? parsed : null;
+  }
+  return null;
+}
+
 class RecommendationData {
   final String decision;
-  final double confidence;
+  final double? confidence;
   final String summary;
 
   const RecommendationData({
     required this.decision,
-    required this.confidence,
+    this.confidence,
     required this.summary,
   });
 
   factory RecommendationData.fromJson(Map<String, dynamic> json) {
     return RecommendationData(
       decision: json['decision']?.toString() ?? 'INSUFFICIENT_DATA',
-      confidence: (json['confidence'] is num)
-          ? (json['confidence'] as num).toDouble()
-          : double.tryParse(json['confidence']?.toString() ?? '0') ?? 0.0,
+      confidence: _parseNullableScore(json['confidence']),
       summary: json['summary']?.toString() ?? '',
     );
   }
 }
 
 class OpportunityData {
-  final double score;
+  final double? score;
   final String level;
   final String justification;
 
   const OpportunityData({
-    required this.score,
+    this.score,
     required this.level,
     required this.justification,
   });
 
   factory OpportunityData.fromJson(Map<String, dynamic> json) {
     return OpportunityData(
-      score: (json['score'] is num)
-          ? (json['score'] as num).toDouble()
-          : double.tryParse(json['score']?.toString() ?? '0') ?? 0.0,
+      score: _parseNullableScore(json['score']),
       level: json['level']?.toString() ?? 'LOW',
       justification: json['justification']?.toString() ?? '',
     );
   }
 }
 
+String? _parseNullableProfitText(dynamic value) {
+  if (value == null || value is bool) return null;
+  final trimmed = value.toString().trim();
+  return trimmed.isEmpty ? null : trimmed;
+}
+
 class ProfitabilityData {
-  final String profit;
-  final String margin;
+  final String? profit;
+  final double? margin;
   final String assessment;
 
   const ProfitabilityData({
-    required this.profit,
-    required this.margin,
+    this.profit,
+    this.margin,
     required this.assessment,
   });
 
   factory ProfitabilityData.fromJson(Map<String, dynamic> json) {
     return ProfitabilityData(
-      profit: json['profit']?.toString() ?? '0.00',
-      margin: json['margin']?.toString() ?? '0%',
+      profit: _parseNullableProfitText(json['profit']),
+      margin: _parseNullablePercentage(json['margin']),
       assessment: json['assessment']?.toString() ?? '',
     );
   }
@@ -64,21 +100,19 @@ class ProfitabilityData {
 
 class CompetitionData {
   final String level;
-  final double score;
+  final double? score;
   final String summary;
 
   const CompetitionData({
     required this.level,
-    required this.score,
+    this.score,
     required this.summary,
   });
 
   factory CompetitionData.fromJson(Map<String, dynamic> json) {
     return CompetitionData(
       level: json['level']?.toString() ?? 'MEDIUM',
-      score: (json['score'] is num)
-          ? (json['score'] as num).toDouble()
-          : double.tryParse(json['score']?.toString() ?? '0') ?? 0.0,
+      score: _parseNullableScore(json['score']),
       summary: json['summary']?.toString() ?? '',
     );
   }
@@ -86,12 +120,12 @@ class CompetitionData {
 
 class RiskData {
   final String level;
-  final double score;
+  final double? score;
   final List<String> factors;
 
   const RiskData({
     required this.level,
-    required this.score,
+    this.score,
     required this.factors,
   });
 
@@ -105,9 +139,7 @@ class RiskData {
     }
     return RiskData(
       level: json['level']?.toString() ?? 'MEDIUM',
-      score: (json['score'] is num)
-          ? (json['score'] as num).toDouble()
-          : double.tryParse(json['score']?.toString() ?? '0') ?? 0.0,
+      score: _parseNullableScore(json['score']),
       factors: factorsList,
     );
   }

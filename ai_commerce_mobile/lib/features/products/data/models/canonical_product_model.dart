@@ -1,68 +1,170 @@
 import 'product_listing_model.dart';
 
+class PriceSummaryModel {
+  final double? lowestPrice;
+  final double? highestPrice;
+  final double? averagePrice;
+  final String currency;
+
+  const PriceSummaryModel({
+    this.lowestPrice,
+    this.highestPrice,
+    this.averagePrice,
+    required this.currency,
+  });
+
+  factory PriceSummaryModel.fromJson(Map<String, dynamic> json) {
+    return PriceSummaryModel(
+      lowestPrice: _parseNullableDouble(json['lowest_price']),
+      highestPrice: _parseNullableDouble(json['highest_price']),
+      averagePrice: _parseNullableDouble(json['average_price']),
+      currency: json['currency']?.toString() ?? 'USD',
+    );
+  }
+}
+
+class PaginationMetaModel {
+  final int currentPage;
+  final int perPage;
+  final int total;
+  final int lastPage;
+  final bool hasMore;
+
+  const PaginationMetaModel({
+    required this.currentPage,
+    required this.perPage,
+    required this.total,
+    required this.lastPage,
+    required this.hasMore,
+  });
+
+  factory PaginationMetaModel.fromJson(Map<String, dynamic> json) {
+    return PaginationMetaModel(
+      currentPage: _parseInt(json['current_page'], fallback: 1),
+      perPage: _parseInt(json['per_page'], fallback: 15),
+      total: _parseInt(json['total']),
+      lastPage: _parseInt(json['last_page'], fallback: 1),
+      hasMore: json['has_more'] as bool? ?? false,
+    );
+  }
+}
+
+class PaginatedProductsModel {
+  final List<CanonicalProductModel> items;
+  final PaginationMetaModel meta;
+
+  const PaginatedProductsModel({
+    required this.items,
+    required this.meta,
+  });
+}
+
 class CanonicalProductModel {
   final int id;
   final String name;
   final String slug;
   final String? brand;
+  final String? modelNumber;
   final String? description;
   final String? categoryName;
   final String baseCurrency;
+  final PriceSummaryModel priceSummary;
   final int activeListingsCount;
-  final double? lowestPrice;
-  final double? highestPrice;
+  final int totalListingsCount;
+  final double? rating;
+  final int reviewsCount;
   final double? latestOpportunityScore;
   final List<ProductListingModel> listings;
+  final String? createdAt;
+  final String? updatedAt;
 
   const CanonicalProductModel({
     required this.id,
     required this.name,
     required this.slug,
     this.brand,
+    this.modelNumber,
     this.description,
     this.categoryName,
     required this.baseCurrency,
+    required this.priceSummary,
     required this.activeListingsCount,
-    this.lowestPrice,
-    this.highestPrice,
+    this.totalListingsCount = 0,
+    this.rating,
+    this.reviewsCount = 0,
     this.latestOpportunityScore,
     this.listings = const [],
+    this.createdAt,
+    this.updatedAt,
   });
 
+  double? get lowestPrice => priceSummary.lowestPrice;
+  double? get highestPrice => priceSummary.highestPrice;
+  double? get averagePrice => priceSummary.averagePrice;
+
   factory CanonicalProductModel.fromJson(Map<String, dynamic> json) {
-    final priceSummary = json['price_summary'] is Map ? json['price_summary'] as Map<String, dynamic> : {};
-    
-    List<ProductListingModel> parsedListings = [];
-    if (json['listings'] is List) {
-      parsedListings = (json['listings'] as List)
-          .whereType<Map<String, dynamic>>()
-          .map((item) => ProductListingModel.fromJson(item))
-          .toList();
+    final rawPriceSummary = json['price_summary'];
+    if (rawPriceSummary is! Map) {
+      throw const FormatException('CanonicalProductModel requires price_summary object.');
     }
 
-    final double? rawLowest = priceSummary['lowest_price'] != null
-        ? double.tryParse(priceSummary['lowest_price'].toString())
-        : (json['lowest_price'] != null ? double.tryParse(json['lowest_price'].toString()) : null);
+    final baseCurrency = json['base_currency']?.toString() ?? 'USD';
+    final parsedSummary = PriceSummaryModel.fromJson(
+      Map<String, dynamic>.from(rawPriceSummary),
+    );
 
-    final double? rawHighest = priceSummary['highest_price'] != null
-        ? double.tryParse(priceSummary['highest_price'].toString())
-        : (json['highest_price'] != null ? double.tryParse(json['highest_price'].toString()) : null);
+    final rawCategory = json['category'];
+    final String? parsedCategoryName = rawCategory is Map
+        ? _parseNullableString(rawCategory['name'])
+        : null;
+
+    final rawListings = json['listings'];
+    final parsedListings = rawListings is List
+        ? rawListings
+            .whereType<Map>()
+            .map((item) => ProductListingModel.fromJson(Map<String, dynamic>.from(item)))
+            .toList()
+        : <ProductListingModel>[];
 
     return CanonicalProductModel(
-      id: json['id'] as int? ?? 0,
-      name: json['name']?.toString() ?? json['title']?.toString() ?? '',
+      id: _parseInt(json['id']),
+      name: json['name']?.toString() ?? '',
       slug: json['slug']?.toString() ?? '',
-      brand: json['brand']?.toString(),
-      description: json['description']?.toString(),
-      categoryName: json['category'] is Map ? json['category']['name']?.toString() : json['category_name']?.toString(),
-      baseCurrency: json['base_currency']?.toString() ?? 'USD',
-      activeListingsCount: json['active_listings_count'] as int? ?? parsedListings.length,
-      lowestPrice: rawLowest,
-      highestPrice: rawHighest,
-      latestOpportunityScore: json['latest_opportunity_score'] != null
-          ? double.tryParse(json['latest_opportunity_score'].toString())
-          : null,
+      brand: _parseNullableString(json['brand']),
+      modelNumber: _parseNullableString(json['model_number']),
+      description: _parseNullableString(json['description']),
+      categoryName: parsedCategoryName,
+      baseCurrency: baseCurrency,
+      priceSummary: parsedSummary,
+      activeListingsCount: _parseInt(json['active_listings_count']),
+      totalListingsCount: _parseInt(json['total_listings_count']),
+      rating: _parseNullableDouble(json['rating']),
+      reviewsCount: _parseInt(json['reviews_count']),
+      latestOpportunityScore: _parseNullableDouble(json['latest_opportunity_score']),
       listings: parsedListings,
+      createdAt: _parseNullableString(json['created_at']),
+      updatedAt: _parseNullableString(json['updated_at']),
     );
   }
+}
+
+int _parseInt(dynamic value, {int fallback = 0}) {
+  if (value is int) return value;
+  if (value is num) return value.toInt();
+  if (value is String) return int.tryParse(value.trim()) ?? fallback;
+  return fallback;
+}
+
+double? _parseNullableDouble(dynamic value) {
+  if (value == null) return null;
+  if (value is double) return value;
+  if (value is num) return value.toDouble();
+  if (value is String) return double.tryParse(value.trim());
+  return null;
+}
+
+String? _parseNullableString(dynamic value) {
+  if (value == null) return null;
+  final str = value.toString().trim();
+  return str.isEmpty ? null : str;
 }

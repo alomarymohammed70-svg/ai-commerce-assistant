@@ -75,7 +75,7 @@ class OpenAIProviderTest extends TestCase
         ]);
 
         $provider = new OpenAIProvider(
-            apiKey: 'sk-real-test-secret-key-abcdef',
+            apiKey: 'test-openai-api-key',
             model: 'gpt-4o-mini',
             timeout: 10,
             maxRetries: 0
@@ -89,7 +89,7 @@ class OpenAIProviderTest extends TestCase
         $this->assertEquals(370, $result->tokensUsed);
 
         Http::assertSent(function ($request) {
-            return $request->hasHeader('Authorization', 'Bearer sk-real-test-secret-key-abcdef')
+            return $request->hasHeader('Authorization', 'Bearer test-openai-api-key')
                 && $request['model'] === 'gpt-4o-mini'
                 && $request['response_format'] === ['type' => 'json_object'];
         });
@@ -167,4 +167,5 @@ class OpenAIProviderTest extends TestCase
         $provider->analyze(['test' => true]);
     }
 }
+
 

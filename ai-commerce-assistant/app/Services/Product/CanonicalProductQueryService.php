@@ -5,6 +5,7 @@ namespace App\Services\Product;
 use App\Models\CanonicalProduct;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\Builder;
+use InvalidArgumentException;
 
 class CanonicalProductQueryService
 {
@@ -12,6 +13,9 @@ class CanonicalProductQueryService
         'created_at',
         'name',
         'brand',
+        'price',
+        'rating',
+        'reviews_count',
     ];
 
     public function paginate(array $filters): LengthAwarePaginator
@@ -107,6 +111,25 @@ class CanonicalProductQueryService
                 $q->where('rating', '>=', $minRating);
             });
         }
+
+        // Filter by Base Currency
+        if (! empty($filters['currency'])) {
+            $query->where('base_currency', strtoupper(trim((string) $filters['currency'])));
+        }
+
+        // Filter by Availability on listings
+        if (isset($filters['availability'])) {
+            $isAvailable = filter_var($filters['availability'], FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE);
+            if ($isAvailable === true) {
+                $query->whereHas('listings', function (Builder $q) {
+                    $q->where('is_available', true);
+                });
+            } elseif ($isAvailable === false) {
+                $query->whereDoesntHave('listings', function (Builder $q) {
+                    $q->where('is_available', true);
+                });
+            }
+        }
     }
 
     protected function applySorting(Builder $query, array $filters): void
@@ -115,13 +138,28 @@ class CanonicalProductQueryService
         $direction = strtolower(trim((string) ($filters['sort_direction'] ?? 'desc')));
 
         if (! in_array($sortBy, self::ALLOWED_SORT_COLUMNS, true)) {
-            $sortBy = 'created_at';
+            throw new InvalidArgumentException("Unsupported sort_by field [{$sortBy}] for canonical products.");
         }
 
         if (! in_array($direction, ['asc', 'desc'], true)) {
-            $direction = 'desc';
+            throw new InvalidArgumentException("Unsupported sort_direction [{$direction}].");
         }
 
-        $query->orderBy($sortBy, $direction);
+        match ($sortBy) {
+            'price' => $query
+                ->withMin([
+                    'listings as sort_min_price' => fn (Builder $q) => $q->where('is_available', true),
+                ], 'price')
+                ->orderBy('sort_min_price', $direction),
+            'rating' => $query
+                ->withAvg('listings as sort_avg_rating', 'rating')
+                ->orderBy('sort_avg_rating', $direction),
+            'reviews_count' => $query
+                ->withSum('listings as sort_total_reviews', 'reviews_count')
+                ->orderBy('sort_total_reviews', $direction),
+            default => $query->orderBy("canonical_products.{$sortBy}", $direction),
+        };
+
+        $query->orderBy('canonical_products.id', $direction);
     }
 }

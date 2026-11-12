@@ -59,12 +59,17 @@ class CanonicalProduct extends Model
     }
 
     /**
-     * Latest calculated metric snapshot.
+     * Latest calculated metric snapshot visible to the current viewer (shared or own).
      */
-    public function latestMetric(): HasOne
+    public function latestMetric(?int $viewerId = null): HasOne
     {
+        $resolvedViewerId = func_num_args() > 0 ? $viewerId : ProductMetric::resolveApiViewerId();
+
         return $this->hasOne(ProductMetric::class, 'canonical_product_id')
-            ->latestOfMany('calculated_at');
+            ->ofMany(
+                ['calculated_at' => 'MAX', 'id' => 'MAX'],
+                fn (Builder $query) => $query->visibleTo($resolvedViewerId)
+            );
     }
 
     /**

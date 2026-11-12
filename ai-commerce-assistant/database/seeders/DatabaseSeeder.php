@@ -19,7 +19,7 @@ class DatabaseSeeder extends Seeder
         ]);
 
         if (User::where('email', 'admin@ai-commerce.local')->doesntExist()) {
-            User::factory()->create([
+            User::factory()->admin()->create([
                 'name' => 'Demo Researcher',
                 'email' => 'admin@ai-commerce.local',
             ]);

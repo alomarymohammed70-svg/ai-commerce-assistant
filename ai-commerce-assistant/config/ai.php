@@ -9,11 +9,12 @@ return [
     |
     | Supported providers: "mock", "openai"
     |
-    | "mock" runs deterministically locally and in CI without incurring API costs.
+    | "mock" runs deterministically locally and in CI without incurring API costs
+    | (blocked in APP_ENV=production).
     | "openai" connects to OpenAI Chat Completions API with JSON mode.
     |
     */
-    'default' => env('AI_PROVIDER', 'mock'),
+    'default' => env('AI_PROVIDER', env('APP_ENV', 'production') === 'production' ? 'openai' : 'mock'),
 
     /*
     |--------------------------------------------------------------------------

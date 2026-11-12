@@ -43,6 +43,7 @@ class AIContextBuilder
         }
 
         // 1. Run Deterministic Financial Math via ProductAnalysisEngine (BCMath)
+        $hasExplicitSellingPrice = $this->hasExplicitSellingPrice($financialInputs);
         $financialParams = $this->prepareFinancialParams($subject, $financialInputs);
         $deterministicMetrics = $this->analysisEngine->calculate($financialParams);
 
@@ -116,12 +117,18 @@ class AIContextBuilder
             $missingData[] = 'verified_purchase_price';
         }
 
-        $calcSelling = (float) $deterministicMetrics['selling_price'];
-        if ($calcSelling <= 0) {
+        $calcSelling = $hasExplicitSellingPrice ? (float) $deterministicMetrics['selling_price'] : 0.0;
+        if (! $hasExplicitSellingPrice || $calcSelling <= 0) {
             $missingData[] = 'verified_selling_price';
         }
 
-        $hasVerifiedShipping = ! empty($financialInputs['shipping_cost']) && (float) $financialInputs['shipping_cost'] > 0;
+        $observedVerifiedShipping = $this->extractVerifiedListingShipping($activeListings);
+        $hasExplicitShippingInput = array_key_exists('shipping_cost', $financialInputs)
+            && $financialInputs['shipping_cost'] !== null
+            && $financialInputs['shipping_cost'] !== ''
+            && is_numeric($financialInputs['shipping_cost']);
+        $hasVerifiedShipping = $observedVerifiedShipping !== null
+            && (! $hasExplicitShippingInput || abs((float) $financialInputs['shipping_cost'] - $observedVerifiedShipping) < 0.0001);
         if (! $hasVerifiedShipping) {
             $missingData[] = 'verified_shipping_cost_estimate';
         }
@@ -161,15 +168,26 @@ class AIContextBuilder
                     'value' => $deterministicMetrics['purchase_price'],
                     'truth' => isset($financialInputs['purchase_price']) ? DataTruthLevel::ESTIMATED : DataTruthLevel::OBSERVED,
                 ],
-                'selling_price' => [
-                    'value' => $deterministicMetrics['selling_price'],
-                    'truth' => DataTruthLevel::CALCULATED,
-                ],
+                'selling_price' => $hasExplicitSellingPrice
+                    ? [
+                        'value' => $deterministicMetrics['selling_price'],
+                        'truth' => DataTruthLevel::CALCULATED,
+                    ]
+                    : [
+                        'value' => null,
+                        'truth' => null,
+                        'status' => 'DATA_UNAVAILABLE',
+                        'note' => 'Selling price was not provided; synthetic markup fallback is disabled.',
+                    ],
                 'shipping_cost' => [
                     'value' => $deterministicMetrics['shipping_cost'],
-                    'truth' => DataTruthLevel::ESTIMATED,
+                    'truth' => $hasVerifiedShipping ? DataTruthLevel::OBSERVED : DataTruthLevel::ESTIMATED,
                     'is_verified' => $hasVerifiedShipping,
-                    'note' => $hasVerifiedShipping ? 'User-supplied quote.' : 'Unverified baseline estimate; carrier rate pending.',
+                    'note' => $hasVerifiedShipping
+                        ? 'Observed verified marketplace/carrier shipping rate.'
+                        : ($hasExplicitShippingInput
+                            ? 'User-supplied estimate; verified carrier rate pending.'
+                            : 'Unverified baseline estimate; carrier rate pending.'),
                 ],
                 'estimated_fees' => [
                     'value' => $deterministicMetrics['estimated_fees'],
@@ -184,23 +202,34 @@ class AIContextBuilder
                     'truth' => DataTruthLevel::CALCULATED,
                     'note' => 'Computed via Laravel BCMath precision.',
                 ],
-                'estimated_profit' => [
-                    'value' => $deterministicMetrics['estimated_profit'],
-                    'truth' => DataTruthLevel::CALCULATED,
-                    'status' => $hasVerifiedShipping ? 'CALCULATED_CONFIRMED' : 'ESTIMATED_PENDING_SHIPPING',
-                    'note' => 'selling_price - total_cost',
-                ],
+                'estimated_profit' => $hasExplicitSellingPrice
+                    ? [
+                        'value' => $deterministicMetrics['estimated_profit'],
+                        'truth' => DataTruthLevel::CALCULATED,
+                        'status' => $hasVerifiedShipping ? 'CALCULATED_CONFIRMED' : 'ESTIMATED_PENDING_SHIPPING',
+                        'note' => 'selling_price - total_cost',
+                    ]
+                    : [
+                        'value' => null,
+                        'truth' => null,
+                        'status' => 'INSUFFICIENT_DATA',
+                        'note' => 'Cannot compute estimated profit without selling_price.',
+                    ],
                 'profit_margin_percent' => [
-                    'value' => $deterministicMetrics['profit_margin'] . '%',
-                    'truth' => DataTruthLevel::CALCULATED,
+                    'value' => $hasExplicitSellingPrice
+                        ? $this->toNullableFloat($deterministicMetrics['profit_margin'] ?? null)
+                        : null,
+                    'truth' => $hasExplicitSellingPrice ? DataTruthLevel::CALCULATED : null,
                 ],
                 'return_on_investment_percent' => [
-                    'value' => $deterministicMetrics['return_on_investment'] . '%',
-                    'truth' => DataTruthLevel::CALCULATED,
+                    'value' => $hasExplicitSellingPrice
+                        ? $this->toNullableFloat($deterministicMetrics['return_on_investment'] ?? null)
+                        : null,
+                    'truth' => $hasExplicitSellingPrice ? DataTruthLevel::CALCULATED : null,
                 ],
                 'is_profitable' => [
-                    'value' => $deterministicMetrics['is_profitable'],
-                    'truth' => DataTruthLevel::CALCULATED,
+                    'value' => $hasExplicitSellingPrice ? $deterministicMetrics['is_profitable'] : null,
+                    'truth' => $hasExplicitSellingPrice ? DataTruthLevel::CALCULATED : null,
                 ],
             ],
             'deterministic_heuristics' => [
@@ -253,7 +282,13 @@ class AIContextBuilder
         }
 
         $purchasePrice = $inputs['purchase_price'] ?? $observedPrice;
-        $sellingPrice = $inputs['selling_price'] ?? ($purchasePrice > 0 ? bcmul((string) $purchasePrice, '1.45', 4) : '0.0000');
+        $sellingPrice = $this->hasExplicitSellingPrice($inputs) ? $inputs['selling_price'] : null;
+
+        $observedShipping = $this->extractVerifiedListingShipping(
+            $subject instanceof ProductListing
+                ? collect([$subject])
+                : ($subject instanceof CanonicalProduct ? $subject->activeListings : collect())
+        );
 
         return [
             'currency' => $inputs['currency'] ?? $currency,
@@ -261,13 +296,55 @@ class AIContextBuilder
             'purchase_currency' => $inputs['purchase_currency'] ?? $currency,
             'selling_price' => $sellingPrice,
             'selling_currency' => $inputs['selling_currency'] ?? $currency,
-            'shipping_cost' => $inputs['shipping_cost'] ?? 0.0,
+            'shipping_cost' => $inputs['shipping_cost'] ?? $observedShipping ?? 0.0,
             'shipping_currency' => $inputs['shipping_currency'] ?? $currency,
             'estimated_fees' => $inputs['estimated_fees'] ?? 0.0,
             'other_costs' => $inputs['other_costs'] ?? 0.0,
             'rating' => $rating,
             'reviews_count' => $reviewsCount,
         ];
+    }
+
+    /**
+     * Extract an observed, verified shipping rate from active listing payloads if present.
+     * User-supplied/default numeric inputs alone must never self-verify shipping.
+     */
+    protected function extractVerifiedListingShipping(iterable $listings): ?float
+    {
+        foreach ($listings as $listing) {
+            if (! $listing instanceof ProductListing || ! is_array($listing->raw_payload)) {
+                continue;
+            }
+
+            $raw = $listing->raw_payload;
+            $isVerified = ($raw['shipping_verified'] ?? $raw['shipping']['verified'] ?? false) === true;
+            $rawCost = $raw['shipping_cost'] ?? $raw['shipping']['cost'] ?? null;
+
+            if ($isVerified && $rawCost !== null && is_numeric($rawCost) && (float) $rawCost >= 0.0) {
+                return (float) $rawCost;
+            }
+        }
+
+        return null;
+    }
+
+    protected function hasExplicitSellingPrice(array $inputs): bool
+    {
+        return array_key_exists('selling_price', $inputs)
+            && $inputs['selling_price'] !== null
+            && $inputs['selling_price'] !== ''
+            && is_numeric($inputs['selling_price']);
+    }
+
+    protected function toNullableFloat(mixed $value, int $precision = 4): ?float
+    {
+        if ($value === null || ! is_numeric($value)) {
+            return null;
+        }
+
+        $float = (float) $value;
+
+        return is_finite($float) ? round($float, $precision) : null;
     }
 }
 

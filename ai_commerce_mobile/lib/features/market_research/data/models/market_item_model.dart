@@ -3,11 +3,11 @@ class MarketItemModel {
   final int? canonicalProductId;
   final String externalId;
   final String title;
-  final double price;
+  final double? price;
   final String currency;
   final double? rating;
   final int reviewsCount;
-  final bool isAvailable;
+  final bool? isAvailable;
   final String? url;
   final String sourceCode;
   final String sourceName;
@@ -17,11 +17,11 @@ class MarketItemModel {
     this.canonicalProductId,
     required this.externalId,
     required this.title,
-    required this.price,
+    this.price,
     required this.currency,
     this.rating,
     required this.reviewsCount,
-    required this.isAvailable,
+    this.isAvailable,
     this.url,
     required this.sourceCode,
     required this.sourceName,
@@ -33,15 +33,30 @@ class MarketItemModel {
       canonicalProductId: json['canonical_product_id'] as int?,
       externalId: json['external_id']?.toString() ?? '',
       title: json['title']?.toString() ?? '',
-      price: double.tryParse(json['price']?.toString() ?? '0') ?? 0.0,
+      price: _parseNullableDouble(json['price']),
       currency: json['currency']?.toString() ?? 'USD',
-      rating: json['rating'] != null ? double.tryParse(json['rating'].toString()) : null,
+      rating: _parseNullableDouble(json['rating']),
       reviewsCount: json['reviews_count'] as int? ?? 0,
-      isAvailable: json['is_available'] as bool? ?? true,
+      isAvailable: json['is_available'] is bool ? json['is_available'] as bool : null,
       url: json['url']?.toString(),
       sourceCode: json['source']?['code']?.toString() ?? 'ebay',
       sourceName: json['source']?['name']?.toString() ?? 'eBay Marketplace',
     );
   }
+}
+
+double? _parseNullableDouble(dynamic value) {
+  if (value == null || value is bool) return null;
+  if (value is num) {
+    final parsed = value.toDouble();
+    return parsed.isFinite ? parsed : null;
+  }
+  if (value is String) {
+    final trimmed = value.trim();
+    if (trimmed.isEmpty) return null;
+    final parsed = double.tryParse(trimmed);
+    return (parsed != null && parsed.isFinite) ? parsed : null;
+  }
+  return null;
 }
 

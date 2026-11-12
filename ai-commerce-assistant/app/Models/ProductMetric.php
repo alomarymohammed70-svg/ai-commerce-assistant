@@ -2,9 +2,11 @@
 
 namespace App\Models;
 
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Http\Request;
 
 class ProductMetric extends Model
 {
@@ -33,6 +35,7 @@ class ProductMetric extends Model
     protected function casts(): array
     {
         return [
+            'user_id' => 'integer',
             'selling_price' => 'decimal:4',
             'purchase_price' => 'decimal:4',
             'shipping_cost' => 'decimal:4',
@@ -46,6 +49,66 @@ class ProductMetric extends Model
             'calculation_notes' => 'array',
             'calculated_at' => 'datetime',
         ];
+    }
+
+    /**
+     * Owning user if created by a personal financial analysis; null indicates shared baseline catalog metric.
+     */
+    public function user(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'user_id');
+    }
+
+    /**
+     * Restrict metrics to shared baseline entries (user_id is null) or records owned by the viewer.
+     */
+    public function scopeVisibleTo(Builder $query, ?int $userId): Builder
+    {
+        $column = $query->qualifyColumn('user_id');
+
+        return $query->where(function (Builder $sub) use ($column, $userId) {
+            $sub->whereNull($column);
+            if ($userId !== null) {
+                $sub->orWhere($column, $userId);
+            }
+        });
+    }
+
+    /**
+     * Determine whether a given viewer may see this metric on catalog/product endpoints.
+     */
+    public function isVisibleTo(?User $viewer): bool
+    {
+        if ($this->user_id === null) {
+            return true;
+        }
+
+        return $viewer !== null && (int) $this->user_id === (int) $viewer->id;
+    }
+
+    /**
+     * Resolve the authenticated API viewer (Sanctum first, stateless-safe).
+     */
+    public static function resolveApiViewer(?Request $request = null): ?User
+    {
+        $sanctumUser = $request?->user('sanctum') ?? auth('sanctum')->user();
+        if ($sanctumUser instanceof User) {
+            return $sanctumUser;
+        }
+
+        $fallback = $request?->user() ?? auth()->user();
+
+        return $fallback instanceof User ? $fallback : null;
+    }
+
+    /**
+     * Resolve the authenticated API viewer user ID, or null for anonymous guests.
+     */
+    public static function resolveApiViewerId(?Request $request = null): ?int
+    {
+        $viewer = static::resolveApiViewer($request);
+
+        return $viewer !== null ? (int) $viewer->id : null;
     }
 
     /**

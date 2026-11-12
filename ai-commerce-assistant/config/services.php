@@ -36,7 +36,8 @@ return [
     ],
 
     'ebay' => [
-        'mode' => env('EBAY_MODE', 'mock'), // 'mock', 'sandbox', 'production'
+        // In production, mock mode is forbidden; default safely to 'production' when APP_ENV=production.
+        'mode' => env('EBAY_MODE', env('APP_ENV', 'production') === 'production' ? 'production' : 'mock'), // 'mock' (non-prod only), 'sandbox', 'production'
         'client_id' => env('EBAY_CLIENT_ID', ''),
         'client_secret' => env('EBAY_CLIENT_SECRET', ''),
         'marketplace_id' => env('EBAY_MARKETPLACE_ID', 'EBAY_US'),

@@ -2,11 +2,11 @@
 
 # Environment files and credentials (CRITICAL)
 .env
-.env.backup
-.env.production
+.env.*
+!.env.example
 ai-commerce-assistant/.env
-ai-commerce-assistant/.env.backup
-ai-commerce-assistant/.env.production
+ai-commerce-assistant/.env.*
+!ai-commerce-assistant/.env.example
 *.env
 
 # Dependencies
@@ -41,3 +41,8 @@ Thumbs.db
 **/.flutter-plugins*
 **/.pub-cache/
 **/.pub/
+
+# Android Signing
+key.properties
+*.jks
+*.keystore

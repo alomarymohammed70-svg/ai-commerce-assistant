@@ -103,6 +103,10 @@ class ApiClient {
           return AuthFailure(message: message, errors: errors);
         }
 
+        if (statusCode == 403) {
+          return ForbiddenFailure(message: message, errors: errors);
+        }
+
         if (statusCode == 404) {
           return NotFoundFailure(message: message);
         }

@@ -16,11 +16,13 @@ class AuthService
      */
     public function register(array $data): array
     {
-        $user = User::create([
+        $user = new User([
             'name' => $data['name'],
             'email' => $data['email'],
             'password' => Hash::make($data['password']),
         ]);
+        $user->role = User::ROLE_USER;
+        $user->save();
 
         $deviceName = $data['device_name'] ?? 'auth-token';
         $token = $user->createToken($deviceName)->plainTextToken;

@@ -12,6 +12,9 @@ use App\Models\ProductListing;
 use App\Services\AI\Recommendation\AIRecommendationEngine;
 use App\Traits\ApiResponseTrait;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Gate;
+use Illuminate\Support\Facades\Log;
 
 class AIProductAnalysisController extends Controller
 {
@@ -34,7 +37,7 @@ class AIProductAnalysisController extends Controller
 
         $validated = $request->validated();
         $shouldSave = $request->boolean('save', true);
-        $driver = $validated['driver'] ?? null;
+        $driver = $this->resolveAuthorizedDriverOverride($request, $validated['driver'] ?? null);
         $userId = $request->user()?->id;
 
         try {
@@ -72,7 +75,7 @@ class AIProductAnalysisController extends Controller
 
         $validated = $request->validated();
         $shouldSave = $request->boolean('save', true);
-        $driver = $validated['driver'] ?? null;
+        $driver = $this->resolveAuthorizedDriverOverride($request, $validated['driver'] ?? null);
         $userId = $request->user()?->id;
 
         try {
@@ -100,17 +103,50 @@ class AIProductAnalysisController extends Controller
     /**
      * Retrieve a past historical AI analysis record.
      */
-    public function show(int|string $id): JsonResponse
+    public function show(Request $request, int|string $id): JsonResponse
     {
-        $analysis = AIAnalysis::with(['canonicalProduct', 'productListing'])->find($id);
+        if (! ctype_digit((string) $id) || (int) $id <= 0) {
+            return $this->errorResponse('AI Analysis not found.', null, 404);
+        }
+
+        $analysis = AIAnalysis::find((int) $id);
 
         if (! $analysis) {
-            return $this->errorResponse("AI Analysis [{$id}] not found.", null, 404);
+            return $this->errorResponse('AI Analysis not found.', null, 404);
         }
+
+        Gate::forUser($request->user())->authorize('view', $analysis);
+
+        $analysis->load(['canonicalProduct', 'productListing']);
 
         return $this->successResponse(
             new AIAnalysisResource($analysis),
             'Historical AI analysis retrieved successfully.'
         );
+    }
+
+    /**
+     * Only permit AI driver overrides for authenticated admins in non-production environments.
+     * In production and for all regular users, configured server AI_PROVIDER remains authoritative.
+     */
+    protected function resolveAuthorizedDriverOverride(Request $request, ?string $requestedDriver): ?string
+    {
+        if ($requestedDriver === null || trim($requestedDriver) === '') {
+            return null;
+        }
+
+        $user = $request->user();
+        if ($user !== null && $user->isAdmin() && app()->environment(['local', 'testing'])) {
+            return strtolower(trim($requestedDriver));
+        }
+
+        Log::warning('ai.driver_override_ignored', [
+            'user_id' => $user?->id,
+            'requested_driver' => $requestedDriver,
+            'configured_default' => config('ai.default', 'mock'),
+            'environment' => app()->environment(),
+        ]);
+
+        return null;
     }
 }

@@ -140,9 +140,10 @@ class ProductAnalysisEngine
      *
      * @param ProductListing|CanonicalProduct $product
      * @param array<string, mixed> $customParams
+     * @param int|null $userId Authenticated owner ID (null for system/shared metrics)
      * @return ProductMetric
      */
-    public function calculateAndPersist(mixed $product, array $customParams = []): ProductMetric
+    public function calculateAndPersist(mixed $product, array $customParams = [], ?int $userId = null): ProductMetric
     {
         $listingId = null;
         $canonicalId = null;
@@ -166,48 +167,82 @@ class ProductAnalysisEngine
             throw new InvalidArgumentException('Product must be an instance of ProductListing or CanonicalProduct.');
         }
 
-        // Default purchase price to observed price if not specified
-        $purchasePrice = $customParams['purchase_price'] ?? $observedPrice;
-        $sellingPrice = $customParams['selling_price']
-            ?? (isset($product->original_price) && $product->original_price ? $product->original_price : bcmul((string) $purchasePrice, '1.50', 4));
+        // Default purchase price to observed price if not specified; never fabricate a synthetic selling_price.
+        $targetCurrency = $customParams['currency'] ?? $currency;
+        $hasExplicitPurchasePrice = $this->hasExplicitNumericParam($customParams, 'purchase_price');
+        $hasExplicitSellingPrice = $this->hasExplicitNumericParam($customParams, 'selling_price');
 
-        $params = array_merge([
-            'currency' => $currency,
+        $purchasePrice = $hasExplicitPurchasePrice ? $customParams['purchase_price'] : $observedPrice;
+        $sellingPrice = $hasExplicitSellingPrice ? $customParams['selling_price'] : null;
+
+        $params = array_merge($customParams, [
+            'currency' => $targetCurrency,
             'purchase_price' => $purchasePrice,
             'purchase_currency' => $customParams['purchase_currency'] ?? $currency,
             'selling_price' => $sellingPrice,
-            'selling_currency' => $customParams['selling_currency'] ?? $currency,
-            'shipping_cost' => $customParams['shipping_cost'] ?? 0.0,
-            'estimated_fees' => $customParams['estimated_fees'] ?? 0.0,
-            'other_costs' => $customParams['other_costs'] ?? 0.0,
-            'rating' => $rating,
-            'reviews_count' => $reviewsCount,
-        ], $customParams);
+            'selling_currency' => $hasExplicitSellingPrice
+                ? ($customParams['selling_currency'] ?? $currency)
+                : $targetCurrency,
+            'shipping_cost' => $this->hasExplicitNumericParam($customParams, 'shipping_cost')
+                ? $customParams['shipping_cost']
+                : 0.0,
+            'estimated_fees' => $this->hasExplicitNumericParam($customParams, 'estimated_fees')
+                ? $customParams['estimated_fees']
+                : 0.0,
+            'other_costs' => $this->hasExplicitNumericParam($customParams, 'other_costs')
+                ? $customParams['other_costs']
+                : 0.0,
+            'rating' => $customParams['rating'] ?? $rating,
+            'reviews_count' => $customParams['reviews_count'] ?? $reviewsCount,
+        ]);
 
         $results = $this->calculate($params);
 
-        return ProductMetric::create([
-            'canonical_product_id' => $canonicalId,
-            'product_id' => $listingId,
-            'purchase_price' => $results['purchase_price'],
-            'selling_price' => $results['selling_price'],
-            'shipping_cost' => $results['shipping_cost'],
-            'estimated_fees' => $results['estimated_fees'],
-            'other_costs' => $results['other_costs'],
-            'estimated_profit' => $results['estimated_profit'],
-            'profit_margin' => $results['profit_margin'],
-            'return_on_investment' => $results['return_on_investment'],
-            'opportunity_score' => $results['opportunity_score'],
-            'risk_score' => $results['risk_score'],
-            'competition_level' => $results['competition_level'],
-            'calculation_notes' => [
+        $calculationNotes = $hasExplicitSellingPrice
+            ? [
                 'is_profitable' => $results['is_profitable'],
                 'currency' => $results['currency'],
                 'original_purchase_currency' => $results['original_purchase_currency'],
                 'original_selling_currency' => $results['original_selling_currency'],
-            ],
+            ]
+            : [
+                'is_profitable' => null,
+                'status' => 'DATA_UNAVAILABLE',
+                'missing_critical_data' => ['selling_price'],
+                'currency' => $results['currency'],
+                'original_purchase_currency' => $results['original_purchase_currency'],
+                'original_selling_currency' => null,
+            ];
+
+        $metric = new ProductMetric([
+            'canonical_product_id' => $canonicalId,
+            'product_id' => $listingId,
+            'purchase_price' => $results['purchase_price'],
+            'selling_price' => $hasExplicitSellingPrice ? $results['selling_price'] : null,
+            'shipping_cost' => $results['shipping_cost'],
+            'estimated_fees' => $results['estimated_fees'],
+            'other_costs' => $results['other_costs'],
+            'estimated_profit' => $hasExplicitSellingPrice ? $results['estimated_profit'] : null,
+            'profit_margin' => $hasExplicitSellingPrice ? $results['profit_margin'] : null,
+            'return_on_investment' => $hasExplicitSellingPrice ? $results['return_on_investment'] : null,
+            'opportunity_score' => $results['opportunity_score'],
+            'risk_score' => $results['risk_score'],
+            'competition_level' => $results['competition_level'],
+            'calculation_notes' => $calculationNotes,
             'calculated_at' => now(),
         ]);
+        $metric->user_id = $userId;
+        $metric->save();
+
+        return $metric;
+    }
+
+    protected function hasExplicitNumericParam(array $params, string $key): bool
+    {
+        return array_key_exists($key, $params)
+            && $params[$key] !== null
+            && $params[$key] !== ''
+            && is_numeric($params[$key]);
     }
 
     /**

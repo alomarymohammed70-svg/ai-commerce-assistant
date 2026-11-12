@@ -13,9 +13,17 @@ void main() {
       expect(CurrencyFormatter.formatUsd(0.0), '\$0.00');
     });
 
-    test('formatPercent formats percentage string', () {
+    test('formatPercent formats percentages without mutating null to 0%', () {
+      expect(CurrencyFormatter.formatPercent(null), 'غير متاح');
+      expect(CurrencyFormatter.formatPercent(0), '0%');
+      expect(CurrencyFormatter.formatPercent(0.0), '0%');
+      expect(CurrencyFormatter.formatPercent('0'), '0%');
+      expect(CurrencyFormatter.formatPercent('0%'), '0%');
+      expect(CurrencyFormatter.formatPercent(''), 'غير متاح');
+      expect(CurrencyFormatter.formatPercent(double.nan), 'غير متاح');
       expect(CurrencyFormatter.formatPercent(25.5), '25.5%');
-      expect(CurrencyFormatter.formatPercent(null), '0.0%');
+      expect(CurrencyFormatter.formatPercent(26.3636), '26.4%');
+      expect(CurrencyFormatter.formatPercent('26.36%'), '26.36%');
     });
   });
 }

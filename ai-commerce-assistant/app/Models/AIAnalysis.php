@@ -33,10 +33,10 @@ class AIAnalysis extends Model
     protected function casts(): array
     {
         return [
-            'opportunity_score' => 'decimal:2',
-            'risk_score' => 'decimal:2',
-            'confidence' => 'decimal:2',
-            'duration_ms' => 'decimal:2',
+            'opportunity_score' => 'float',
+            'risk_score' => 'float',
+            'confidence' => 'float',
+            'duration_ms' => 'float',
             'tokens_used' => 'integer',
             'deterministic_metrics' => 'array',
             'context_snapshot' => 'array',
